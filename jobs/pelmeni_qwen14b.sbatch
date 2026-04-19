@@ -18,11 +18,10 @@ module purge
 module load singularity/3.9.0
 
 export HF_HOME="$PROJECT_DIR/.cache/huggingface"
-export HF_DATASETS_CACHE="$PROJECT_DIR/.cache/hf_datasets"
 export VLLM_CACHE_ROOT="$PROJECT_DIR/.cache/vllm"
-
 export HF_HUB_OFFLINE=1
-export TRANSFORMERS_OFFLINE=1
+
+mkdir -p outputs .cache/huggingface .cache/vllm
 
 echo "===== JOB INFO ====="
 echo "Job ID: $SLURM_JOB_ID"
@@ -35,11 +34,7 @@ echo "===== HOST GPU INFO ====="
 nvidia-smi
 echo
 
-echo "===== HOST DISK INFO ====="
-du -sh "$IMAGE" || true
-echo
-
-echo "===== RUN SINGLE CONTAINER SESSION ====="
+echo "===== RUN CONTAINER SESSION ====="
 
 singularity exec --nv \
   --bind "$PROJECT_DIR:$PROJECT_DIR" \
@@ -47,7 +42,6 @@ singularity exec --nv \
   --env HF_HOME="$HF_HOME" \
   --env VLLM_CACHE_ROOT="$VLLM_CACHE_ROOT" \
   --env HF_HUB_OFFLINE="$HF_HUB_OFFLINE" \
-  --env TRANSFORMERS_OFFLINE="$TRANSFORMERS_OFFLINE" \
   "$IMAGE" \
   bash -lc '
     set -e
