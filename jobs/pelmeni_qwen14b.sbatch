@@ -10,7 +10,7 @@
 set -e
 
 PROJECT_DIR="$HOME/master-cluster-HSE"
-IMAGE="$PROJECT_DIR/containers/vllm-openai-0.8.5.sif"
+IMAGE="$PROJECT_DIR/containers/vllm-openai-0.8.5-sandbox"
 
 cd "$PROJECT_DIR"
 
@@ -25,8 +25,6 @@ export VLLM_CACHE_ROOT="$PROJECT_DIR/.cache/vllm"
 export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 
-mkdir -p logs outputs .cache/huggingface .cache/hf_datasets .cache/vllm
-
 echo "===== JOB INFO ====="
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURMD_NODENAME"
@@ -38,36 +36,16 @@ echo "===== HOST GPU INFO ====="
 nvidia-smi
 echo
 
-echo "===== CONTAINER CHECK ====="
-
-singularity exec --nv \
-  --bind "$PROJECT_DIR:$PROJECT_DIR" \
-  --env HF_HOME="$HF_HOME" \
-  --env TRANSFORMERS_CACHE="$TRANSFORMERS_CACHE" \
-  --env HF_DATASETS_CACHE="$HF_DATASETS_CACHE" \
-  --env VLLM_CACHE_ROOT="$VLLM_CACHE_ROOT" \
-  "$IMAGE" \
-  python3 -c "import sys; print('python:', sys.version)"
-
-singularity exec --nv \
-  --bind "$PROJECT_DIR:$PROJECT_DIR" \
-  --env HF_HOME="$HF_HOME" \
-  --env TRANSFORMERS_CACHE="$TRANSFORMERS_CACHE" \
-  --env HF_DATASETS_CACHE="$HF_DATASETS_CACHE" \
-  --env VLLM_CACHE_ROOT="$VLLM_CACHE_ROOT" \
-  "$IMAGE" \
-  python3 -c "import torch; print('torch:', torch.__version__); print('cuda:', torch.cuda.is_available()); print('devices:', torch.cuda.device_count())"
-
-singularity exec --nv \
-  --bind "$PROJECT_DIR:$PROJECT_DIR" \
-  "$IMAGE" \
-  python3 -c "import vllm; print('vllm:', vllm.__version__)"
-
+echo "===== HOST DISK INFO ====="
+df -h "$PROJECT_DIR" "$SINGULARITY_TMPDIR" || true
+du -sh "$IMAGE" || true
 echo
-echo "===== RUN PELMENI SCRIPT ====="
+
+echo "===== RUN SINGLE CONTAINER SESSION ====="
 
 singularity exec --nv \
   --bind "$PROJECT_DIR:$PROJECT_DIR" \
+  --env PROJECT_DIR="$PROJECT_DIR" \
   --env HF_HOME="$HF_HOME" \
   --env TRANSFORMERS_CACHE="$TRANSFORMERS_CACHE" \
   --env HF_DATASETS_CACHE="$HF_DATASETS_CACHE" \
@@ -75,4 +53,24 @@ singularity exec --nv \
   --env HF_HUB_OFFLINE="$HF_HUB_OFFLINE" \
   --env TRANSFORMERS_OFFLINE="$TRANSFORMERS_OFFLINE" \
   "$IMAGE" \
-  python3 -u scripts/pelmeni_qwen14b.py
+  bash -lc '
+    set -e
+
+    cd "$PROJECT_DIR"
+
+    echo "===== CONTAINER PYTHON INFO ====="
+    which python3
+    python3 -V
+    echo
+
+    echo "===== CONTAINER TORCH CHECK ====="
+    python3 -c "import torch; print(\"torch:\", torch.__version__); print(\"cuda:\", torch.cuda.is_available()); print(\"devices:\", torch.cuda.device_count())"
+    echo
+
+    echo "===== CONTAINER VLLM CHECK ====="
+    python3 -c "import vllm; print(\"vllm:\", vllm.__version__)"
+    echo
+
+    echo "===== RUN PELMENI SCRIPT ====="
+    python3 -u scripts/pelmeni_qwen14b.py
+  '
