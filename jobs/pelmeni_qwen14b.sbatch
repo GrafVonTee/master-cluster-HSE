@@ -14,8 +14,8 @@ cd "$HOME/hse-cl-rl-course-work"
 module purge
 module load Python
 
-source deactivate || true
-source activate clrl
+conda deactivate || true
+conda activate clrl
 
 export HF_HOME="$HOME/hse-cl-rl-course-work/.cache/huggingface"
 export TRANSFORMERS_CACHE="$HF_HOME"
