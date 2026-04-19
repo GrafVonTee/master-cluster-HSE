@@ -18,7 +18,6 @@ module purge
 module load singularity/3.9.0
 
 export HF_HOME="$PROJECT_DIR/.cache/huggingface"
-export TRANSFORMERS_CACHE="$HF_HOME"
 export HF_DATASETS_CACHE="$PROJECT_DIR/.cache/hf_datasets"
 export VLLM_CACHE_ROOT="$PROJECT_DIR/.cache/vllm"
 
@@ -37,7 +36,6 @@ nvidia-smi
 echo
 
 echo "===== HOST DISK INFO ====="
-df -h "$PROJECT_DIR" "$SINGULARITY_TMPDIR" || true
 du -sh "$IMAGE" || true
 echo
 
@@ -47,8 +45,6 @@ singularity exec --nv \
   --bind "$PROJECT_DIR:$PROJECT_DIR" \
   --env PROJECT_DIR="$PROJECT_DIR" \
   --env HF_HOME="$HF_HOME" \
-  --env TRANSFORMERS_CACHE="$TRANSFORMERS_CACHE" \
-  --env HF_DATASETS_CACHE="$HF_DATASETS_CACHE" \
   --env VLLM_CACHE_ROOT="$VLLM_CACHE_ROOT" \
   --env HF_HUB_OFFLINE="$HF_HUB_OFFLINE" \
   --env TRANSFORMERS_OFFLINE="$TRANSFORMERS_OFFLINE" \
