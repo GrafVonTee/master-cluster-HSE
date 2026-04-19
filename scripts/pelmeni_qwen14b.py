@@ -39,12 +39,12 @@ def main():
     print("Loading model with vLLM...", flush=True)
 
     llm = LLM(
-        model=MODEL_NAME,
-        dtype="bfloat16",
-        max_model_len=4096,
-        gpu_memory_utilization=0.90,
-        trust_remote_code=True,
-    )
+		model=MODEL_NAME,
+		dtype="half",
+		max_model_len=2048,
+		gpu_memory_utilization=0.95,
+		trust_remote_code=True,
+	)
 
     sampling_params = SamplingParams(
         temperature=0.3,
