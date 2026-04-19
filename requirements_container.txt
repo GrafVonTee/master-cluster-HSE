@@ -1,0 +1,8 @@
+datasets
+pandas
+numpy
+tqdm
+pyyaml
+orjson
+jsonlines
+huggingface_hub

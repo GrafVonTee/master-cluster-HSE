@@ -8,20 +8,23 @@ MODEL_NAME = "Qwen/Qwen3-14B"
 
 
 def main():
-    print("Starting Qwen3-14B smoke test...", flush=True)
+    print("Starting Qwen3-14B smoke test with vLLM...", flush=True)
     print(f"Model: {MODEL_NAME}", flush=True)
+
+    print("Loading tokenizer...", flush=True)
 
     tokenizer = AutoTokenizer.from_pretrained(
         MODEL_NAME,
         trust_remote_code=True,
+        local_files_only=True,
     )
 
     messages = [
         {
             "role": "user",
             "content": (
-                "Очень подробно и со всеми тонкостями объясни, как сварить пельмени по шагам. "
-                "Ответь по-русски."
+                "Кратко и по шагам объясни, как сварить пельмени. "
+                "Ответь по-русски. /no_think"
             ),
         }
     ]
@@ -38,7 +41,7 @@ def main():
     llm = LLM(
         model=MODEL_NAME,
         dtype="bfloat16",
-        max_model_len=8192,
+        max_model_len=4096,
         gpu_memory_utilization=0.90,
         trust_remote_code=True,
     )
@@ -46,13 +49,12 @@ def main():
     sampling_params = SamplingParams(
         temperature=0.3,
         top_p=0.8,
-        max_tokens=2048,
+        max_tokens=512,
     )
 
     print("Generating answer...", flush=True)
 
     outputs = llm.generate([prompt], sampling_params)
-
     answer = outputs[0].outputs[0].text.strip()
 
     print("\n===== MODEL ANSWER =====\n", flush=True)

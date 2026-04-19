@@ -7,8 +7,6 @@
 #SBATCH --gpus=1
 #SBATCH --cpus-per-task=4
 
-set -e
-
 cd "$HOME/hse-cl-rl-course-work"
 
 module purge

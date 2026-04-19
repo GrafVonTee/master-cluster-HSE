@@ -28,12 +28,32 @@ module load Python
 conda create -n clrl python=3.11 -y
 source activate clrl
 
-pip install -U pip setuptools wheel
 pip install -r requirements.txt
 ```
 
 ### Запуск smoke-test
 
 ```bash
-sbatch jobs/00_smoke_qwen14b.sbatch
+sbatch jobs/pelmeni_qwen14b.sbatch
+```
+
+### Проверка задачи
+
+```bash
+mj
+mj --start
+squeue -u $USER
+```
+
+### Просмотр логов
+
+```bash
+tail -f logs/qwen14b-pelmeni-*.out
+tail -f logs/qwen14b-pelmeni-*.err
+```
+
+### Отмена задачи
+
+```bash
+scancel JOB_ID
 ```
