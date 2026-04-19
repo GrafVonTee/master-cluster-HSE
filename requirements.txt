@@ -1,7 +1,7 @@
-vllm>=0.8.5
-transformers>=4.51.0
-torch
+torch==2.6.0
+vllm==0.8.5
+transformers>=4.51.1,<4.54
 accelerate
 sentencepiece
 protobuf
-huggingface_hub
+huggingface_hub>=0.30.0
