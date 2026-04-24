@@ -2,7 +2,7 @@
 #SBATCH --job-name=score-pythoncodes-cl
 #SBATCH --output=logs/score-pythoncodes-cl-%j.out
 #SBATCH --error=logs/score-pythoncodes-cl-%j.err
-#SBATCH --time=00:30:00
+#SBATCH --time=00:40:00
 #SBATCH --partition=test
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -28,7 +28,6 @@ export HF_DATASETS_CACHE="$HF_HOME/datasets"
 export VLLM_CACHE_ROOT="$PROJECT_DIR/.cache/vllm"
 export TOKENIZERS_PARALLELISM=false
 
-# На compute-ноде работаем строго из заранее подготовленного кэша.
 export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 export HF_DATASETS_OFFLINE=1
@@ -95,6 +94,6 @@ singularity exec --nv \
 
 echo "===== OUTPUTS ====="
 ls -lah outputs/curriculum || true
-du -sh datasets/pythoncodes_cl_scored_test || true
+du -sh datasets/pythoncodes_cl_scored || true
 
 echo "===== DONE ====="
