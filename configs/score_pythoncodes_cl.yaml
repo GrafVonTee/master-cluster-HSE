@@ -1,0 +1,40 @@
+dataset:
+  name: flytech/python-codes-25k
+  split: train
+
+  # Для test-очереди. Потом поставим null.
+  limit: 100
+
+model:
+  name_or_path: Qwen/Qwen3-4B-Instruct-2507
+  local_path: null
+
+  dtype: float16
+  device: cuda
+
+curriculum:
+  # np.percentile ждёт проценты, не доли.
+  percentiles: [33, 66]
+  batch_size: 4
+
+  # Все методы из старого peta_lover / src.
+  # llm_judge медленный, но на limit=100 проверим.
+  scorers:
+    - length
+    - ppl
+    - ifd
+    - lexical_cluster
+    - semantic_cluster
+    - llm_judge
+
+  lexical_clusters: 5
+  semantic_clusters: 5
+
+runtime:
+  offline: true
+
+output:
+  dataset_dir: datasets/pythoncodes_cl_scored_test
+  parquet_path: outputs/curriculum/pythoncodes_cl_scored_test.parquet
+  csv_path: outputs/curriculum/pythoncodes_cl_scored_test_preview.csv
+  summary_path: outputs/curriculum/pythoncodes_cl_scored_test_summary.json
