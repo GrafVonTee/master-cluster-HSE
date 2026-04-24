@@ -24,9 +24,13 @@ outputs/*
 datasets/*
 !datasets/.gitkeep
 
+containers/*
+!containers/*.def
+!containers/Dockerfile.*
+
+dist/
 models/
 checkpoints/
-containers/
 wandb/
 runs/
 

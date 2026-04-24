@@ -1,8 +1,22 @@
+--extra-index-url https://download.pytorch.org/whl/cu124
+
+torch==2.6.0
+vllm==0.8.5
+
+transformers>=4.51.0,<4.53
+accelerate
 datasets
-pandas
+huggingface_hub
+safetensors
+sentencepiece
+protobuf
+tiktoken
+
 numpy
+pandas
+pyarrow
+scikit-learn
 tqdm
 pyyaml
 orjson
 jsonlines
-huggingface_hub

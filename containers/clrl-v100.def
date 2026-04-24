@@ -1,0 +1,64 @@
+Bootstrap: docker
+From: nvidia/cuda:12.4.1-devel-ubuntu22.04
+
+%files
+    requirements_container.txt /tmp/requirements_container.txt
+
+%labels
+    Author GrafVonTee
+    Project cl-rl-course-work
+    Target V100 cluster scoring
+
+%environment
+    export LC_ALL=C.UTF-8
+    export LANG=C.UTF-8
+    export PYTHONUNBUFFERED=1
+    export PIP_NO_CACHE_DIR=1
+    export HF_HOME=/workspace/.cache/huggingface
+    export VLLM_CACHE_ROOT=/workspace/.cache/vllm
+    export TRANSFORMERS_CACHE=/workspace/.cache/huggingface
+    export HF_DATASETS_CACHE=/workspace/.cache/huggingface/datasets
+
+%post
+    set -eux
+
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        python3 \
+        python3-pip \
+        python3-venv \
+        python3-dev \
+        git \
+        git-lfs \
+        build-essential \
+        cmake \
+        ninja-build \
+        curl \
+        wget \
+        ca-certificates \
+        libopenmpi-dev \
+        openmpi-bin
+
+    python3 -m pip install --upgrade pip setuptools wheel
+
+    python3 -m pip install -r /tmp/requirements_container.txt
+
+    python3 -m pip cache purge || true
+    apt-get clean
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+%runscript
+    exec python3 "$@"
+
+%test
+    python3 - <<'PY'
+import torch
+import transformers
+import datasets
+import sklearn
+print("torch", torch.__version__)
+print("cuda available", torch.cuda.is_available())
+print("transformers", transformers.__version__)
+print("datasets", datasets.__version__)
+print("sklearn ok")
+PY
