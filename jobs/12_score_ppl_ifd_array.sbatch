@@ -2,8 +2,8 @@
 #SBATCH --job-name=ppl-ifd
 #SBATCH --output=logs/ppl-ifd-%A-%a.out
 #SBATCH --error=logs/ppl-ifd-%A-%a.err
-#SBATCH --time=00:30:00
-#SBATCH --partition=test
+#SBATCH --time=01:00:00
+#SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gpus=1

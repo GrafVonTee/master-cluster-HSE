@@ -26,6 +26,15 @@ semantic:
   n_clusters: 10
   layer_idx: null
 
+# llm_judge:
+#   enabled: true
+#   batch_size: 4
+#   max_length: 2048
+#   max_new_tokens: 8
+#   # 1 = very easy, 5 = very hard
+#   min_score: 1
+#   max_score: 5
+
 curriculum:
   percentiles: [33, 66]
 

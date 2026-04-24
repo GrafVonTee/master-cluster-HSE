@@ -38,11 +38,13 @@ def assign_categories(scores, percentiles: list[float]) -> tuple[list[str], list
     return categories, [float(p_low), float(p_high)]
 
 
-def _read_chunked_parquets(chunks_dir: Path) -> pd.DataFrame:
+def _read_chunked_parquets(chunks_dir: Path, required: bool = True) -> pd.DataFrame | None:
     files = sorted(chunks_dir.glob("chunk_*.parquet"))
 
     if not files:
-        raise RuntimeError(f"No parquet chunks found in {chunks_dir}")
+        if required:
+            raise RuntimeError(f"No parquet chunks found in {chunks_dir}")
+        return None
 
     return pd.concat(
         [pd.read_parquet(path) for path in files],
@@ -61,6 +63,7 @@ def merge_curriculum_scores(cfg: dict) -> dict:
     lexical_path = root / "lexical.parquet"
     semantic_path = root / "semantic.parquet"
     ppl_ifd_chunks_dir = root / "ppl_ifd_chunks"
+    llm_judge_chunks_dir = root / "llm_judge_chunks"
 
     required_files = [
         length_path,
@@ -76,8 +79,14 @@ def merge_curriculum_scores(cfg: dict) -> dict:
         pd.read_parquet(length_path),
         pd.read_parquet(lexical_path),
         pd.read_parquet(semantic_path),
-        _read_chunked_parquets(ppl_ifd_chunks_dir),
+        _read_chunked_parquets(ppl_ifd_chunks_dir, required=True),
     ]
+
+    llm_judge_df = _read_chunked_parquets(llm_judge_chunks_dir, required=False)
+    has_llm_judge = llm_judge_df is not None
+
+    if has_llm_judge:
+        parts.append(llm_judge_df)
 
     df = base_df
 
@@ -95,6 +104,9 @@ def merge_curriculum_scores(cfg: dict) -> dict:
         "lexical_cluster_score",
         "semantic_cluster_score",
     ]
+
+    if has_llm_judge and "llm_judge_score" in df.columns:
+        score_columns.append("llm_judge_score")
 
     percentiles = cfg["curriculum"].get("percentiles", [33, 66])
 
@@ -145,6 +157,7 @@ def merge_curriculum_scores(cfg: dict) -> dict:
 
     summary = {
         "num_rows": int(len(output_df)),
+        "has_llm_judge": bool(has_llm_judge),
         "score_columns": score_columns,
         "thresholds": thresholds,
         "category_counts": category_counts,

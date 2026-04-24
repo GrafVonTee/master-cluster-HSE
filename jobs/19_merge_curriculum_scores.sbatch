@@ -3,7 +3,7 @@
 #SBATCH --output=logs/merge-cl-%j.out
 #SBATCH --error=logs/merge-cl-%j.err
 #SBATCH --time=00:30:00
-#SBATCH --partition=test
+#SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8

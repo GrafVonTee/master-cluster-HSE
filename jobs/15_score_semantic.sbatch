@@ -2,8 +2,8 @@
 #SBATCH --job-name=sem-score
 #SBATCH --output=logs/sem-score-%j.out
 #SBATCH --error=logs/sem-score-%j.err
-#SBATCH --time=00:30:00
-#SBATCH --partition=test
+#SBATCH --time=01:00:00
+#SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
