@@ -2,8 +2,8 @@
 #SBATCH --job-name=score-pythoncodes-cl
 #SBATCH --output=logs/score-pythoncodes-cl-%j.out
 #SBATCH --error=logs/score-pythoncodes-cl-%j.err
-#SBATCH --time=00:40:00
-#SBATCH --partition=test
+#SBATCH --time=01:00:00
+#SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gpus=1
