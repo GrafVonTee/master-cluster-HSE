@@ -20,9 +20,10 @@ module purge
 module load singularity/3.9.0
 
 export PROJECT_DIR="$PROJECT_DIR"
+export PYTHONPATH="$PROJECT_DIR:${PYTHONPATH:-}"
+
 export HF_HOME="$PROJECT_DIR/.cache/huggingface"
 export HF_DATASETS_CACHE="$HF_HOME/datasets"
-export TRANSFORMERS_CACHE="$HF_HOME"
 export VLLM_CACHE_ROOT="$PROJECT_DIR/.cache/vllm"
 export TOKENIZERS_PARALLELISM=false
 
@@ -42,6 +43,7 @@ echo "date: $(date)"
 echo "project: $PROJECT_DIR"
 echo "image: $IMAGE"
 echo "pwd: $(pwd)"
+echo "PYTHONPATH: $PYTHONPATH"
 
 echo "===== MODULES ====="
 module list || true
@@ -87,9 +89,9 @@ echo "===== CONTAINER BASIC CHECK ====="
 singularity exec --nv \
   --bind "$PROJECT_DIR:$PROJECT_DIR" \
   --env PROJECT_DIR="$PROJECT_DIR" \
+  --env PYTHONPATH="$PYTHONPATH" \
   --env HF_HOME="$HF_HOME" \
   --env HF_DATASETS_CACHE="$HF_DATASETS_CACHE" \
-  --env TRANSFORMERS_CACHE="$TRANSFORMERS_CACHE" \
   --env VLLM_CACHE_ROOT="$VLLM_CACHE_ROOT" \
   --env TOKENIZERS_PARALLELISM="$TOKENIZERS_PARALLELISM" \
   "$IMAGE" \
@@ -99,9 +101,9 @@ echo "===== CONTAINER PYTHON CHECK ====="
 singularity exec --nv \
   --bind "$PROJECT_DIR:$PROJECT_DIR" \
   --env PROJECT_DIR="$PROJECT_DIR" \
+  --env PYTHONPATH="$PYTHONPATH" \
   --env HF_HOME="$HF_HOME" \
   --env HF_DATASETS_CACHE="$HF_DATASETS_CACHE" \
-  --env TRANSFORMERS_CACHE="$TRANSFORMERS_CACHE" \
   --env VLLM_CACHE_ROOT="$VLLM_CACHE_ROOT" \
   --env TOKENIZERS_PARALLELISM="$TOKENIZERS_PARALLELISM" \
   "$IMAGE" \

@@ -2,14 +2,23 @@ import os
 import sys
 from pathlib import Path
 
+project_dir = Path(
+    os.environ.get("PROJECT_DIR", Path(__file__).resolve().parents[1])
+).resolve()
+
+if str(project_dir) not in sys.path:
+    sys.path.insert(0, str(project_dir))
+
 print("===== PYTHON =====")
 print("python:", sys.version)
 print("executable:", sys.executable)
 print("cwd:", os.getcwd())
+print("sys.path[0:5]:", sys.path[:5])
 
 print("\n===== ENV =====")
 for key in [
     "PROJECT_DIR",
+    "PYTHONPATH",
     "HF_HOME",
     "HF_DATASETS_CACHE",
     "TRANSFORMERS_CACHE",
@@ -20,11 +29,11 @@ for key in [
     print(f"{key}:", os.environ.get(key))
 
 print("\n===== PATHS =====")
-project_dir = Path(os.environ.get("PROJECT_DIR", ".")).resolve()
 print("project_dir:", project_dir)
 print("project exists:", project_dir.exists())
 print("scripts exists:", (project_dir / "scripts").exists())
 print("src exists:", (project_dir / "src").exists())
+print("src/config.py exists:", (project_dir / "src" / "config.py").exists())
 
 print("\n===== TORCH / CUDA =====")
 import torch
@@ -59,6 +68,7 @@ except Exception as e:
 
 print("\n===== SRC IMPORTS =====")
 from src.config import PROJECT_DIR, DATASETS_DIR, OUTPUTS_DIR, MODELS_DIR
+
 print("src.config ok")
 print("PROJECT_DIR:", PROJECT_DIR)
 print("DATASETS_DIR:", DATASETS_DIR)
