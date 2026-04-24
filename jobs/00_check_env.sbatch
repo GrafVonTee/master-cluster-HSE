@@ -7,6 +7,7 @@
 #SBATCH --ntasks=1
 #SBATCH --gpus=1
 #SBATCH --cpus-per-task=4
+#SBATCH --partition=test
 
 set -euo pipefail
 
