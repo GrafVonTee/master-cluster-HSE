@@ -1,0 +1,41 @@
+dataset:
+  name: flytech/python-codes-25k
+  split: train
+  limit: null
+
+  # 25k / 1000 ≈ 25 array tasks.
+  # Для partition=test лучше не делать слишком крупно.
+  chunk_size: 1000
+
+model:
+  name_or_path: Qwen/Qwen3-4B-Instruct-2507
+  local_path: null
+  dtype: float16
+  device: cuda
+
+loss:
+  batch_size: 4
+  max_length: 2048
+
+lexical:
+  n_clusters: 10
+
+semantic:
+  batch_size: 8
+  max_length: 1024
+  n_clusters: 10
+  layer_idx: null
+
+curriculum:
+  percentiles: [33, 66]
+
+runtime:
+  offline: true
+  skip_existing: true
+
+output:
+  root: outputs/curriculum_array
+  final_dataset_dir: datasets/pythoncodes_cl_scored
+  final_parquet_path: outputs/curriculum_array/pythoncodes_cl_scored.parquet
+  final_preview_csv_path: outputs/curriculum_array/pythoncodes_cl_scored_preview.csv
+  final_summary_path: outputs/curriculum_array/pythoncodes_cl_summary.json
