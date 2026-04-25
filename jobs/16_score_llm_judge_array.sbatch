@@ -3,7 +3,7 @@
 #SBATCH --output=logs/llm-judge-%A-%a.out
 #SBATCH --error=logs/llm-judge-%A-%a.err
 #SBATCH --time=00:30:00
-#SBATCH --partition=train
+#SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gpus=1
