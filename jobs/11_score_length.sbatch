@@ -2,11 +2,11 @@
 #SBATCH --job-name=score-length
 #SBATCH --output=logs/score-length-%j.out
 #SBATCH --error=logs/score-length-%j.err
-#SBATCH --time=00:30:00
-#SBATCH --partition=test
+#SBATCH --time=00:10:00
+#SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=1
 
 set -euo pipefail
 
