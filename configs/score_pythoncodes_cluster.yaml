@@ -5,7 +5,7 @@ dataset:
   chunk_size: 5000
 
 model:
-  name_or_path: Qwen/Qwen3-4B-Instruct-2507
+  name_or_path: Qwen/Qwen3-14b
   local_path: null
   dtype: float16
   device: cuda

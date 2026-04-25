@@ -65,7 +65,7 @@ MODELS = {
     },
 }
 
-SELECTED_MODEL = os.environ.get("SELECTED_MODEL", "14b")
+SELECTED_MODEL = os.environ.get("SELECTED_MODEL", "4b-instruct")
 
 if SELECTED_MODEL not in MODELS:
     raise ValueError(f"Unknown SELECTED_MODEL={SELECTED_MODEL}. Available: {list(MODELS)}")
