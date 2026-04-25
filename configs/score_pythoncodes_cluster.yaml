@@ -2,10 +2,7 @@ dataset:
   name: flytech/python-codes-25k
   split: train
   limit: null
-
-  # 25k / 1000 ≈ 25 array tasks.
-  # Для partition=test лучше не делать слишком крупно.
-  chunk_size: 1000
+  chunk_size: 5000
 
 model:
   name_or_path: Qwen/Qwen3-4B-Instruct-2507
@@ -28,7 +25,7 @@ semantic:
 
 llm_judge:
   enabled: true
-  batch_size: 4
+  batch_size: 8
   max_length: 2048
   max_new_tokens: 8
   # 1 = very easy, 5 = very hard

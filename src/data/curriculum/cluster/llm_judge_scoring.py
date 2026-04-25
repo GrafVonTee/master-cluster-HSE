@@ -52,7 +52,7 @@ Consider:
 - edge cases;
 - required Python knowledge.
 
-Return only one integer from {min_score} to {max_score}. Do not explain.
+Return only one integer from {min_score} to {max_score}. Do not explain. Do not write anything except the number.
 
 Example:
 {example}
@@ -64,19 +64,24 @@ def _apply_chat_template_or_fallback(tokenizer, prompts: list[str]) -> list[str]
     texts = []
 
     for prompt in prompts:
-        messages = [
-            {
-                "role": "user",
-                "content": prompt,
-            }
-        ]
+        messages = [{"role": "user", "content": prompt}]
 
         try:
             text = tokenizer.apply_chat_template(
                 messages,
                 tokenize=False,
                 add_generation_prompt=True,
+                enable_thinking=False,
             )
+        except TypeError:
+            try:
+                text = tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+            except Exception:
+                text = prompt
         except Exception:
             text = prompt
 
@@ -90,17 +95,13 @@ def _parse_score(text: str, min_score: int, max_score: int) -> float:
         return np.nan
 
     text = str(text).strip()
-
     match = re.search(r"[-+]?\d+", text)
+
     if match is None:
         return np.nan
 
     value = int(match.group(0))
-
-    if value < min_score:
-        value = min_score
-    if value > max_score:
-        value = max_score
+    value = max(min_score, min(max_score, value))
 
     return float(value)
 
@@ -137,6 +138,7 @@ def _generate_scores(
             **encoded,
             max_new_tokens=max_new_tokens,
             do_sample=False,
+            use_cache=True,
             pad_token_id=tokenizer.pad_token_id,
             eos_token_id=tokenizer.eos_token_id,
         )
@@ -165,6 +167,7 @@ def score_llm_judge_chunk(cfg: dict, task_id: int | None = None) -> str | None:
     ds = load_source_dataset(cfg)
     require_columns(ds, ["instruction", "input", "output"])
 
+    # ВАЖНО: используем глобальный dataset.chunk_size.
     chunk_size = int(cfg["dataset"]["chunk_size"])
     start, end = chunk_bounds(len(ds), chunk_size, int(task_id))
 
@@ -191,16 +194,20 @@ def score_llm_judge_chunk(cfg: dict, task_id: int | None = None) -> str | None:
     device = cfg["model"].get("device", "cuda")
 
     judge_cfg = cfg.get("llm_judge", {})
-    batch_size = int(judge_cfg.get("batch_size", 4))
+    batch_size = int(judge_cfg.get("batch_size", 8))
     max_length = int(judge_cfg.get("max_length", 2048))
-    max_new_tokens = int(judge_cfg.get("max_new_tokens", 8))
+    max_new_tokens = int(judge_cfg.get("max_new_tokens", 4))
     min_score = int(judge_cfg.get("min_score", 1))
     max_score = int(judge_cfg.get("max_score", 5))
 
     indexed_rows = [(start + i, row) for i, row in enumerate(ds)]
     rows = []
 
-    for batch in tqdm(list(_batched(indexed_rows, batch_size)), desc=f"llm_judge chunk {task_id}"):
+    for batch in tqdm(
+        _batched(indexed_rows, batch_size),
+        total=(len(indexed_rows) + batch_size - 1) // batch_size,
+        desc=f"llm_judge chunk {task_id}",
+    ):
         idxs = [item[0] for item in batch]
         examples = [item[1] for item in batch]
 
@@ -259,7 +266,7 @@ def score_llm_judge_chunk(cfg: dict, task_id: int | None = None) -> str | None:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(rows).sort_values("__idx")
     atomic_to_parquet(df, out_path)
 
     print(f"saved: {out_path}", flush=True)
