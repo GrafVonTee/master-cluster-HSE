@@ -2,7 +2,7 @@ dataset:
   name: flytech/python-codes-25k
   split: train
   limit: null
-  chunk_size: 100
+  chunk_size: 5000
 
 model:
   name_or_path: Qwen/Qwen3-14b
