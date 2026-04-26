@@ -1,6 +1,5 @@
 import gc
 import os
-import re
 
 import numpy as np
 import pandas as pd
@@ -39,32 +38,30 @@ def _format_example(row: dict) -> str:
 def _build_judge_prompt(row: dict, min_score: int, max_score: int) -> str:
     example = _format_example(row)
 
-    return f"""You must rate the difficulty of a Python code generation training example.
+    return f"""You are a strict difficulty classifier for Python code generation training examples.
 
-Valid labels:
+Choose exactly one label:
 {min_score} = very easy
 2 = easy
 3 = medium
 4 = hard
 {max_score} = very hard
 
-Rules:
-- Output exactly one digit.
-- The first character of your answer must be the digit.
-- Do not explain.
-- Do not repeat the task.
-- Do not write markdown.
+Return only one digit: {min_score}, 2, 3, 4, or {max_score}.
 
-Example to rate:
+Example:
 {example}
 
-Answer with one digit only:"""
+Difficulty label:"""
 
 
 def _apply_chat_template_or_fallback(tokenizer, prompts: list[str]) -> list[str]:
     texts = []
 
     for prompt in prompts:
+        # /no_think помогает Qwen3 не уходить в reasoning-текст.
+        prompt = prompt + "\n/no_think"
+
         messages = [{"role": "user", "content": prompt}]
 
         try:
@@ -91,34 +88,41 @@ def _apply_chat_template_or_fallback(tokenizer, prompts: list[str]) -> list[str]
     return texts
 
 
-def _parse_score(text: str, min_score: int, max_score: int) -> float:
-    if text is None:
-        return np.nan
-
-    text = str(text).strip()
-    match = re.search(r"[-+]?\d+", text)
-
-    if match is None:
-        return np.nan
-
-    value = int(match.group(0))
-    value = max(min_score, min(max_score, value))
-
-    return float(value)
-
-
 def _batched(items: list, batch_size: int):
     for i in range(0, len(items), batch_size):
         yield items[i:i + batch_size]
 
 
-def _generate_scores(
+def _candidate_token_ids(tokenizer, min_score: int, max_score: int) -> dict[int, list[int]]:
+    out = {}
+
+    for score in range(min_score, max_score + 1):
+        variants = [
+            str(score),
+            f" {score}",
+            f"\n{score}",
+            f"\n\n{score}",
+        ]
+
+        ids = []
+
+        for text in variants:
+            token_ids = tokenizer.encode(text, add_special_tokens=False)
+
+            if len(token_ids) >= 1:
+                ids.append(int(token_ids[-1]))
+
+        out[score] = sorted(set(ids))
+
+    return out
+
+
+def _forced_choice_scores(
     model,
     tokenizer,
     prompts: list[str],
     device: str,
     max_length: int,
-    max_new_tokens: int,
     min_score: int,
     max_score: int,
 ) -> tuple[list[float], list[str]]:
@@ -132,33 +136,46 @@ def _generate_scores(
         return_tensors="pt",
     ).to(device)
 
-    input_lengths = encoded["attention_mask"].sum(dim=1).tolist()
+    attention_mask = encoded["attention_mask"]
+    last_positions = attention_mask.sum(dim=1) - 1
+
+    candidate_ids = _candidate_token_ids(tokenizer, min_score, max_score)
 
     with torch.inference_mode():
-        generated = model.generate(
-            **encoded,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
-            use_cache=True,
-            pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id,
+        outputs = model(
+            input_ids=encoded["input_ids"],
+            attention_mask=attention_mask,
+            use_cache=False,
         )
 
-    raw_outputs = []
+        logits = outputs.logits
+        next_logits = logits[
+            torch.arange(logits.shape[0], device=logits.device),
+            last_positions,
+            :,
+        ].float()
 
-    for i, output_ids in enumerate(generated):
-        new_tokens = output_ids[int(input_lengths[i]):]
-        raw = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
-        raw_outputs.append(raw)
+        batch_scores = []
+        raw_outputs = []
 
-    scores = [
-        _parse_score(raw, min_score=min_score, max_score=max_score)
-        for raw in raw_outputs
-    ]
+        for row_logits in next_logits:
+            score_to_logit = {}
 
-    del encoded, generated
+            for score, ids in candidate_ids.items():
+                if not ids:
+                    score_to_logit[score] = -float("inf")
+                    continue
 
-    return scores, raw_outputs
+                token_logits = row_logits[torch.tensor(ids, device=row_logits.device)]
+                score_to_logit[score] = float(token_logits.max().detach().cpu().item())
+
+            best_score = max(score_to_logit, key=score_to_logit.get)
+            batch_scores.append(float(best_score))
+            raw_outputs.append(f"forced_choice:{best_score}; logits={score_to_logit}")
+
+    del encoded, attention_mask, outputs, logits, next_logits
+
+    return batch_scores, raw_outputs
 
 
 def score_llm_judge_chunk(cfg: dict, task_id: int | None = None) -> str | None:
@@ -168,7 +185,6 @@ def score_llm_judge_chunk(cfg: dict, task_id: int | None = None) -> str | None:
     ds = load_source_dataset(cfg)
     require_columns(ds, ["instruction", "input", "output"])
 
-    # ВАЖНО: используем глобальный dataset.chunk_size.
     chunk_size = int(cfg["dataset"]["chunk_size"])
     start, end = chunk_bounds(len(ds), chunk_size, int(task_id))
 
@@ -191,13 +207,13 @@ def score_llm_judge_chunk(cfg: dict, task_id: int | None = None) -> str | None:
 
     tokenizer = load_tokenizer_cached(cfg)
     model = load_model_cached(cfg)
+    model.config.use_cache = False
 
     device = cfg["model"].get("device", "cuda")
 
     judge_cfg = cfg.get("llm_judge", {})
     batch_size = int(judge_cfg.get("batch_size", 8))
     max_length = int(judge_cfg.get("max_length", 2048))
-    max_new_tokens = int(judge_cfg.get("max_new_tokens", 4))
     min_score = int(judge_cfg.get("min_score", 1))
     max_score = int(judge_cfg.get("max_score", 5))
 
@@ -218,13 +234,12 @@ def score_llm_judge_chunk(cfg: dict, task_id: int | None = None) -> str | None:
         ]
 
         try:
-            scores, raw_outputs = _generate_scores(
+            scores, raw_outputs = _forced_choice_scores(
                 model=model,
                 tokenizer=tokenizer,
                 prompts=prompts,
                 device=device,
                 max_length=max_length,
-                max_new_tokens=max_new_tokens,
                 min_score=min_score,
                 max_score=max_score,
             )
@@ -242,13 +257,12 @@ def score_llm_judge_chunk(cfg: dict, task_id: int | None = None) -> str | None:
             raw_outputs = []
 
             for prompt in prompts:
-                one_score, one_raw = _generate_scores(
+                one_score, one_raw = _forced_choice_scores(
                     model=model,
                     tokenizer=tokenizer,
                     prompts=[prompt],
                     device=device,
                     max_length=max_length,
-                    max_new_tokens=max_new_tokens,
                     min_score=min_score,
                     max_score=max_score,
                 )
@@ -258,14 +272,11 @@ def score_llm_judge_chunk(cfg: dict, task_id: int | None = None) -> str | None:
         for idx, score, raw in zip(idxs, scores, raw_outputs):
             rows.append({
                 "__idx": int(idx),
-                "llm_judge_score": float(score) if np.isfinite(score) else np.nan,
+                "llm_judge_score": float(score),
                 "llm_judge_raw": raw,
             })
 
         gc.collect()
-
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
     df = pd.DataFrame(rows).sort_values("__idx")
     atomic_to_parquet(df, out_path)

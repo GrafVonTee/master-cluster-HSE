@@ -25,10 +25,9 @@ semantic:
 
 llm_judge:
   enabled: true
-  batch_size: 24
-  max_length: 4096
-  max_new_tokens: 8
-  # 1 = very easy, 5 = very hard
+  mode: forced_choice
+  batch_size: 8
+  max_length: 2048
   min_score: 1
   max_score: 5
 
