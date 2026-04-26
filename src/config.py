@@ -2,42 +2,35 @@ import os
 from pathlib import Path
 
 
-def _is_bad_container_path(path: Path) -> bool:
-    s = str(path)
-    return (
-        s == "/workspace"
-        or s.startswith("/workspace/")
-        or s == "/root"
-        or s.startswith("/root/")
-    )
-
-
-def _env_path(name: str, default: Path) -> Path:
-    raw = os.environ.get(name)
-
-    if raw is None or raw.strip() == "":
-        return default
-
-    path = Path(raw).expanduser()
-
-    # Dockerfile ENV внутри Singularity может указывать на read-only /workspace.
-    # На кластере такие пути нельзя использовать для cache/output.
-    if _is_bad_container_path(path):
-        return default
-
-    return path
-
-
 PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", Path.cwd())).expanduser().resolve()
 
-MODELS_DIR = _env_path("MODELS_DIR", PROJECT_DIR / "models")
-DATASETS_DIR = _env_path("DATASETS_DIR", PROJECT_DIR / "datasets")
-OUTPUTS_DIR = _env_path("OUTPUTS_DIR", PROJECT_DIR / "outputs")
-LOGS_DIR = _env_path("LOGS_DIR", PROJECT_DIR / "logs")
+MODELS_DIR = Path(os.environ.get("MODELS_DIR", PROJECT_DIR / "models")).expanduser()
+if str(MODELS_DIR) == "/workspace" or str(MODELS_DIR).startswith("/workspace/"):
+    MODELS_DIR = PROJECT_DIR / "models"
 
-HF_HOME = _env_path("HF_HOME", PROJECT_DIR / ".cache" / "huggingface")
-HF_DATASETS_CACHE = _env_path("HF_DATASETS_CACHE", HF_HOME / "datasets")
-VLLM_CACHE_ROOT = _env_path("VLLM_CACHE_ROOT", PROJECT_DIR / ".cache" / "vllm")
+DATASETS_DIR = Path(os.environ.get("DATASETS_DIR", PROJECT_DIR / "datasets")).expanduser()
+if str(DATASETS_DIR) == "/workspace" or str(DATASETS_DIR).startswith("/workspace/"):
+    DATASETS_DIR = PROJECT_DIR / "datasets"
+
+OUTPUTS_DIR = Path(os.environ.get("OUTPUTS_DIR", PROJECT_DIR / "outputs")).expanduser()
+if str(OUTPUTS_DIR) == "/workspace" or str(OUTPUTS_DIR).startswith("/workspace/"):
+    OUTPUTS_DIR = PROJECT_DIR / "outputs"
+
+LOGS_DIR = Path(os.environ.get("LOGS_DIR", PROJECT_DIR / "logs")).expanduser()
+if str(LOGS_DIR) == "/workspace" or str(LOGS_DIR).startswith("/workspace/"):
+    LOGS_DIR = PROJECT_DIR / "logs"
+
+HF_HOME = Path(os.environ.get("HF_HOME", PROJECT_DIR / ".cache" / "huggingface")).expanduser()
+if str(HF_HOME) == "/workspace" or str(HF_HOME).startswith("/workspace/"):
+    HF_HOME = PROJECT_DIR / ".cache" / "huggingface"
+
+HF_DATASETS_CACHE = Path(os.environ.get("HF_DATASETS_CACHE", HF_HOME / "datasets")).expanduser()
+if str(HF_DATASETS_CACHE) == "/workspace" or str(HF_DATASETS_CACHE).startswith("/workspace/"):
+    HF_DATASETS_CACHE = HF_HOME / "datasets"
+
+VLLM_CACHE_ROOT = Path(os.environ.get("VLLM_CACHE_ROOT", PROJECT_DIR / ".cache" / "vllm")).expanduser()
+if str(VLLM_CACHE_ROOT) == "/workspace" or str(VLLM_CACHE_ROOT).startswith("/workspace/"):
+    VLLM_CACHE_ROOT = PROJECT_DIR / ".cache" / "vllm"
 
 for p in [
     MODELS_DIR,
@@ -50,10 +43,15 @@ for p in [
 ]:
     p.mkdir(parents=True, exist_ok=True)
 
+
 MODELS = {
     "4b-instruct": {
         "name": "Qwen/Qwen3-4B-Instruct-2507",
-        "path": str(MODELS_DIR / "qwen3-4B-instruct-2507"),
+        "path": str(MODELS_DIR / "qwen3-4b-instruct-2507"),
+    },
+    "4b-thinking": {
+        "name": "Qwen/Qwen3-4B-Thinking-2507",
+        "path": str(MODELS_DIR / "qwen3-4b-thinking-2507"),
     },
     "7b": {
         "name": "Qwen/Qwen3-7B",
@@ -65,6 +63,7 @@ MODELS = {
     },
 }
 
+
 SELECTED_MODEL = os.environ.get("SELECTED_MODEL", "4b-instruct")
 
 if SELECTED_MODEL not in MODELS:
@@ -72,8 +71,9 @@ if SELECTED_MODEL not in MODELS:
 
 MODEL_NAME = MODELS[SELECTED_MODEL]["name"]
 MODEL_PATH = MODELS[SELECTED_MODEL]["path"]
-
+SFT_MODEL_PATH = os.environ.get("SFT_MODEL_PATH", str(MODELS_DIR / f"{SELECTED_MODEL}-sft"))
 MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "2048"))
+
 
 VLLM_PARAMS = {
     "max_model_len": MAX_TOKENS,
@@ -85,6 +85,7 @@ VLLM_PARAMS = {
     "trust_remote_code": True,
 }
 
+
 SAMPLING_SETTINGS = {
     "max_tokens": MAX_TOKENS,
     "ignore_eos": False,
@@ -92,5 +93,6 @@ SAMPLING_SETTINGS = {
     "logprobs": 1,
     "repetition_penalty": 1,
 }
+
 
 NUM_PROCESSES = int(os.environ.get("NUM_PROCESSES", "4"))
