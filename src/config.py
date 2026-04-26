@@ -92,6 +92,7 @@ SAMPLING_SETTINGS = {
     "detokenize": True,
     "logprobs": 1,
     "repetition_penalty": 1,
+    "chat_template_kwargs": {"enable_thinking": False},
 }
 
 
