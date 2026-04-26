@@ -39,25 +39,26 @@ def _format_example(row: dict) -> str:
 def _build_judge_prompt(row: dict, min_score: int, max_score: int) -> str:
     example = _format_example(row)
 
-    return f"""You are evaluating the difficulty of a Python code generation training example.
+    return f"""You must rate the difficulty of a Python code generation training example.
 
-Rate the example from {min_score} to {max_score}:
+Valid labels:
 {min_score} = very easy
+2 = easy
+3 = medium
+4 = hard
 {max_score} = very hard
 
-Consider:
-- algorithmic complexity;
-- amount of reasoning needed;
-- code length;
-- edge cases;
-- required Python knowledge.
+Rules:
+- Output exactly one digit.
+- The first character of your answer must be the digit.
+- Do not explain.
+- Do not repeat the task.
+- Do not write markdown.
 
-Return only one integer from {min_score} to {max_score}. Do not explain. Do not write anything except the number.
-
-Example:
+Example to rate:
 {example}
 
-Difficulty score:"""
+Answer with one digit only:"""
 
 
 def _apply_chat_template_or_fallback(tokenizer, prompts: list[str]) -> list[str]:
