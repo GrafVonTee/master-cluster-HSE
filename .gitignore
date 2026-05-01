@@ -39,3 +39,6 @@ runs/
 *.log
 
 .DS_Store
+*.tar.gz
+
+unsloth_compiled_cache

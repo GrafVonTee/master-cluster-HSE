@@ -69,6 +69,8 @@ def merge_curriculum_scores(cfg: dict) -> dict:
         length_path,
         lexical_path,
         semantic_path,
+        ppl_ifd_chunks_dir,
+        llm_judge_chunks_dir,
     ]
 
     for path in required_files:
@@ -80,13 +82,8 @@ def merge_curriculum_scores(cfg: dict) -> dict:
         pd.read_parquet(lexical_path),
         pd.read_parquet(semantic_path),
         _read_chunked_parquets(ppl_ifd_chunks_dir, required=True),
+        _read_chunked_parquets(llm_judge_chunks_dir, required=True),
     ]
-
-    llm_judge_df = _read_chunked_parquets(llm_judge_chunks_dir, required=False)
-    has_llm_judge = llm_judge_df is not None
-
-    if has_llm_judge:
-        parts.append(llm_judge_df)
 
     df = base_df
 
@@ -103,10 +100,8 @@ def merge_curriculum_scores(cfg: dict) -> dict:
         "ifd_score",
         "lexical_cluster_score",
         "semantic_cluster_score",
+        "llm_judge_score",
     ]
-
-    if has_llm_judge and "llm_judge_score" in df.columns:
-        score_columns.append("llm_judge_score")
 
     percentiles = cfg["curriculum"].get("percentiles", [33, 66])
 
@@ -157,7 +152,6 @@ def merge_curriculum_scores(cfg: dict) -> dict:
 
     summary = {
         "num_rows": int(len(output_df)),
-        "has_llm_judge": bool(has_llm_judge),
         "score_columns": score_columns,
         "thresholds": thresholds,
         "category_counts": category_counts,
