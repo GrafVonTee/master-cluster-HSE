@@ -1,0 +1,43 @@
+services:
+  unsloth:
+    build:
+      context: .
+      dockerfile: containers/Dockerfile.unsloth
+
+    image: master-cluster-hse-unsloth
+    container_name: master-cluster-hse-unsloth
+
+    user: root
+    working_dir: /workspace
+
+    volumes:
+      - .:/workspace
+
+    ports:
+      - "8888:8888"
+      - "8000:8000"
+
+    gpus: all
+    ipc: host
+    shm_size: "16g"
+
+    environment:
+      PYTHONPATH: /workspace
+      HF_HOME: /workspace/.cache/huggingface
+      HF_DATASETS_CACHE: /workspace/.cache/hf_datasets
+      VLLM_CACHE_ROOT: /workspace/.cache/vllm
+      TOKENIZERS_PARALLELISM: "false"
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+
+    entrypoint: ["/bin/bash", "-lc"]
+
+    command: >
+      "jupyter lab
+      --ip=0.0.0.0
+      --port=8888
+      --no-browser
+      --allow-root
+      --notebook-dir=/workspace
+      --ServerApp.token=''
+      --ServerApp.password=''"
