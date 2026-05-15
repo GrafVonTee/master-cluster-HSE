@@ -1,37 +1,41 @@
+x-unsloth-base: &unsloth-base
+  build:
+    context: .
+    dockerfile: containers/Dockerfile.unsloth
+  image: master-cluster-hse-unsloth
+  user: root
+  working_dir: /workspace
+  volumes:
+    - .:/workspace
+  ipc: host
+  shm_size: "16g"
+  environment:
+    PROJECT_DIR: /workspace
+    PYTHONPATH: /workspace
+    HF_HOME: /workspace/.cache/huggingface
+    HF_DATASETS_CACHE: /workspace/.cache/hf_datasets
+    VLLM_CACHE_ROOT: /workspace/.cache/vllm
+    TOKENIZERS_PARALLELISM: "false"
+    SELECTED_MODEL: 4b-instruct
+    MAX_TOKENS: 2048
+    GPU_MEMORY_UTILIZATION: 0.88
+    TRAIN_MAX_STEPS_OVERRIDE: ${TRAIN_MAX_STEPS_OVERRIDE:-}
+    EVAL_MAX_NEW_TOKENS: ${EVAL_MAX_NEW_TOKENS:-512}
+    NVIDIA_VISIBLE_DEVICES: all
+    NVIDIA_DRIVER_CAPABILITIES: compute,utility
+
+x-unsloth-gpu: &unsloth-gpu
+  gpus: all
+
 services:
   unsloth:
-    build:
-      context: .
-      dockerfile: containers/Dockerfile.unsloth
-
-    image: master-cluster-hse-unsloth
+    <<: [*unsloth-base, *unsloth-gpu]
     container_name: master-cluster-hse-unsloth
-
-    user: root
-    working_dir: /workspace
-
-    volumes:
-      - .:/workspace
-
     ports:
       - "8888:8888"
       - "8000:8000"
-
-    gpus: all
-    ipc: host
-    shm_size: "16g"
-
-    environment:
-      PYTHONPATH: /workspace
-      HF_HOME: /workspace/.cache/huggingface
-      HF_DATASETS_CACHE: /workspace/.cache/hf_datasets
-      VLLM_CACHE_ROOT: /workspace/.cache/vllm
-      TOKENIZERS_PARALLELISM: "false"
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: compute,utility
-
+      - "6006:6006"
     entrypoint: ["/bin/bash", "-lc"]
-
     command: >
       "jupyter lab
       --ip=0.0.0.0
@@ -41,3 +45,35 @@ services:
       --notebook-dir=/workspace
       --ServerApp.token=''
       --ServerApp.password=''"
+
+  train:
+    <<: [*unsloth-base, *unsloth-gpu]
+    container_name: master-cluster-hse-train
+    entrypoint: []
+    command: ["python", "scripts/train_cl_lora_all.py"]
+
+  eval:
+    <<: [*unsloth-base, *unsloth-gpu]
+    container_name: master-cluster-hse-eval
+    entrypoint: []
+    command: ["python", "scripts/eval_lora_all.py"]
+
+  tensorboard:
+    <<: *unsloth-base
+    container_name: master-cluster-hse-tensorboard
+    ports:
+      - "6006:6006"
+    environment:
+      PROJECT_DIR: /workspace
+      PYTHONPATH: /workspace
+      HF_HOME: /workspace/.cache/huggingface
+      HF_DATASETS_CACHE: /workspace/.cache/hf_datasets
+      VLLM_CACHE_ROOT: /workspace/.cache/vllm
+      TOKENIZERS_PARALLELISM: "false"
+    entrypoint: ["/bin/bash", "-lc"]
+    command: >
+      "tensorboard
+      --logdir /workspace/outputs/runs
+      --host 0.0.0.0
+      --port 6006
+      --reload_interval 5"

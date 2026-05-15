@@ -1,5 +1,6 @@
 dataset:
   name: pythoncodes_cl_scored
+  disk_path: datasets/pythoncodes_cl_scored
   parquet_path: outputs/curriculum_array/pythoncodes_cl_scored.parquet
   val_size: 1000
   limit: null
@@ -36,7 +37,7 @@ training:
   warmup_steps: 25
   lr: 0.0002
   lr_scheduler_type: cosine
-  optim: adamw_8bit
+  optim: paged_adamw_8bit
   assistant_only_loss: true
   packing: false
   logging_steps: 10
@@ -47,8 +48,12 @@ training:
   dataloader_num_workers: 2
   dataloader_pin_memory: true
   max_grad_norm: 1.0
+  seed: 42
 
 runs:
+  # Ordinary SFT baseline. It uses the same pythoncodes rows as CL, but ignores
+  # all curriculum score/category columns and shuffles the full train split.
+  # Budget is 600 steps = 3 CL stages * 200 steps, so comparison is fair.
   - name: sft_pythoncodes
     category_col: null
     max_steps: 600

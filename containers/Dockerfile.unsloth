@@ -2,6 +2,7 @@ FROM unsloth/unsloth:2026.4.8-pt2.10.0-vllm-0.16.0-cu12.8-studio-release-v0.1.37
 
 WORKDIR /workspace
 
+ENV PROJECT_DIR=/workspace
 ENV PYTHONPATH=/workspace
 ENV HF_HOME=/workspace/.cache/huggingface
 ENV HF_DATASETS_CACHE=/workspace/.cache/hf_datasets
@@ -9,8 +10,13 @@ ENV VLLM_CACHE_ROOT=/workspace/.cache/vllm
 ENV TOKENIZERS_PARALLELISM=false
 
 RUN python -m pip install --no-cache-dir \
-	jupyterlab \
-	ipykernel \
-	ipywidgets
+    jupyterlab \
+    ipykernel \
+    ipywidgets \
+    tensorboard \
+    pandas \
+    pyarrow \
+    pyyaml \
+    tabulate
 
 CMD ["/bin/bash"]

@@ -3,12 +3,26 @@ import torch
 from trl import SFTTrainer
 from transformers import TrainingArguments
 from unsloth import FastLanguageModel
-from datasets import IterableDataset, Dataset
+from datasets import IterableDataset, Dataset, load_from_disk
 import src.config as config
 from src.logger import setup_logger
 
 
 logger = setup_logger(__name__, "training.log")
+
+
+def make_cl_dataset_fn(category_col, category):
+    def dataset_fn(tokenizer, split="train"):
+        dataset = load_from_disk(config.DATASETS_DIR / "pythoncodes_cl_scored")
+
+        if hasattr(dataset, "keys"):
+            dataset = dataset[split] if split in dataset else dataset["train"]
+
+        dataset = dataset.filter(lambda x: x[category_col] == category)
+
+        return dataset
+
+    return dataset_fn
 
 
 def train_model_pipelinel(training_stages):

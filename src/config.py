@@ -87,12 +87,11 @@ VLLM_PARAMS = {
 
 
 SAMPLING_SETTINGS = {
-    "max_tokens": MAX_TOKENS,
+    "max_tokens": int(os.environ.get("EVAL_MAX_NEW_TOKENS", "512") or "512"),
     "ignore_eos": False,
     "detokenize": True,
     "logprobs": 1,
     "repetition_penalty": 1,
-    "chat_template_kwargs": {"enable_thinking": False},
 }
 
 

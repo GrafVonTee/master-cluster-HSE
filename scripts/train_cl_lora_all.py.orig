@@ -1,0 +1,553 @@
+#!/usr/bin/env python3
+"""
+Container-side training script adapted from old_fashion/notebooks/nuggets.ipynb.
+It trains five independent LoRA adapters on the scored pythoncodes curriculum dataset.
+Each adapter is trained as easy -> medium -> hard inside the same Docker container.
+"""
+
+from __future__ import annotations
+
+import argparse
+import gc
+import json
+import logging
+import math
+import os
+import random
+import shutil
+import sys
+from contextlib import contextmanager
+from datetime import datetime
+from inspect import signature
+from pathlib import Path
+from typing import Any, Iterable
+
+import unsloth  # noqa: F401  # must be imported before transformers/trl/peft
+from unsloth import FastLanguageModel
+
+import pandas as pd
+import torch
+import yaml
+from datasets import Dataset, load_dataset, load_from_disk
+from huggingface_hub import snapshot_download
+from torch.utils.tensorboard import SummaryWriter
+from transformers import DataCollatorForSeq2Seq, TrainerCallback, TrainingArguments, set_seed
+
+try:
+    from trl import SFTConfig, SFTTrainer
+except ImportError:  # older TRL
+    SFTConfig = None
+    from trl import SFTTrainer
+
+import src.config as config
+from src.data.prompt import pythoncodes_cl_scored
+
+
+LOG_ROOT = config.LOGS_DIR / "train"
+RUN_ROOT = config.OUTPUTS_DIR / "train_runs"
+TB_ROOT = config.OUTPUTS_DIR / "runs" / "train"
+
+
+class Tee:
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, data: str) -> None:
+        for stream in self.streams:
+            stream.write(data)
+            stream.flush()
+
+    def flush(self) -> None:
+        for stream in self.streams:
+            stream.flush()
+
+
+@contextmanager
+def tee_to_file(path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        old_stdout, old_stderr = sys.stdout, sys.stderr
+        sys.stdout = Tee(old_stdout, f)
+        sys.stderr = Tee(old_stderr, f)
+        try:
+            yield
+        finally:
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
+
+
+class JsonlMetricCallback(TrainerCallback):
+    def __init__(self, jsonl_path: Path, logger: logging.Logger, tb_dir: Path | None = None):
+        self.jsonl_path = jsonl_path
+        self.logger = logger
+        self.latest_grad_norm: float | None = None
+        self.writer = SummaryWriter(log_dir=str(tb_dir)) if tb_dir is not None else None
+        self.jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def on_pre_optimizer_step(self, args, state, control, model=None, **kwargs):
+        # Transformers often logs grad_norm itself, but this keeps the value available
+        # even when the installed version does not include it in the log dict.
+        if model is None:
+            return
+        logging_steps = max(1, int(getattr(args, "logging_steps", 1) or 1))
+        if int(state.global_step) % logging_steps != 0:
+            return
+
+        total_sq = 0.0
+        for p in model.parameters():
+            if p.grad is None:
+                continue
+            grad = p.grad.detach().float()
+            param_norm = grad.norm(2).item()
+            total_sq += param_norm * param_norm
+        self.latest_grad_norm = float(total_sq ** 0.5)
+
+        if self.writer is not None:
+            self.writer.add_scalar("train/manual_grad_norm", self.latest_grad_norm, int(state.global_step))
+            self.writer.flush()
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if not logs:
+            return
+
+        payload = {
+            "time": datetime.now().isoformat(timespec="seconds"),
+            "step": int(state.global_step),
+            "epoch": float(state.epoch or 0.0),
+            **{k: _json_safe(v) for k, v in logs.items()},
+        }
+
+        if "grad_norm" not in payload and self.latest_grad_norm is not None:
+            payload["grad_norm"] = self.latest_grad_norm
+
+        if "eval_loss" in payload:
+            try:
+                payload["eval_perplexity"] = float(math.exp(min(float(payload["eval_loss"]), 20.0)))
+            except Exception:
+                pass
+
+        with self.jsonl_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+        short = ", ".join(
+            f"{k}={v:.5g}" if isinstance(v, float) else f"{k}={v}"
+            for k, v in payload.items()
+            if k not in {"time"}
+        )
+        self.logger.info(short)
+
+    def on_train_end(self, args, state, control, **kwargs):
+        if self.writer is not None:
+            self.writer.flush()
+            self.writer.close()
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, (int, float, str, bool)) or value is None:
+        return value
+    try:
+        return float(value)
+    except Exception:
+        return str(value)
+
+
+def make_logger(run_name: str) -> logging.Logger:
+    LOG_ROOT.mkdir(parents=True, exist_ok=True)
+    logger = logging.getLogger(f"train.{run_name}")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    logger.handlers.clear()
+
+    fmt = logging.Formatter(
+        "%(asctime)s | %(levelname)-8s | %(name)s :: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    stream = logging.StreamHandler(sys.stdout)
+    stream.setFormatter(fmt)
+    file_handler = logging.FileHandler(LOG_ROOT / f"{run_name}.log", encoding="utf-8", mode="a")
+    file_handler.setFormatter(fmt)
+    logger.addHandler(stream)
+    logger.addHandler(file_handler)
+    return logger
+
+
+def read_yaml(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def resolve_path(path_like: str | None) -> Path | None:
+    if not path_like:
+        return None
+    path = Path(path_like)
+    if not path.is_absolute():
+        path = config.PROJECT_DIR / path
+    return path
+
+
+def ensure_base_model(local_files_only: bool = False) -> None:
+    model_dir = Path(config.MODEL_PATH)
+    has_config = (model_dir / "config.json").exists()
+    if has_config:
+        return
+
+    snapshot_download(
+        repo_id=config.MODEL_NAME,
+        local_dir=str(model_dir),
+        local_dir_use_symlinks=False,
+        resume_download=True,
+        local_files_only=local_files_only,
+    )
+
+
+def load_scored_dataset(cfg: dict[str, Any]) -> Dataset:
+    ds_cfg = cfg["dataset"]
+    disk_path = resolve_path(ds_cfg.get("disk_path"))
+    parquet_path = resolve_path(ds_cfg.get("parquet_path"))
+
+    if parquet_path and parquet_path.exists():
+        dataset = load_dataset("parquet", data_files=str(parquet_path), split="train")
+    elif disk_path and disk_path.exists():
+        dataset = load_from_disk(str(disk_path))
+        if hasattr(dataset, "keys"):
+            dataset = dataset["train"] if "train" in dataset else next(iter(dataset.values()))
+    else:
+        raise FileNotFoundError(
+            f"Cannot find scored dataset. Checked disk_path={disk_path}, parquet_path={parquet_path}"
+        )
+
+    limit = ds_cfg.get("limit")
+    if limit:
+        dataset = dataset.select(range(min(int(limit), len(dataset))))
+
+    return dataset
+
+
+def split_dataset(dataset: Dataset, cfg: dict[str, Any]) -> tuple[Dataset, Dataset]:
+    ds_cfg = cfg["dataset"]
+    seed = int(ds_cfg.get("seed", 42))
+    val_size = int(ds_cfg.get("val_size", 1000))
+
+    dataset = dataset.shuffle(seed=seed)
+    val_size = min(val_size, max(1, len(dataset) // 10), len(dataset) - 1)
+    val_dataset = dataset.select(range(val_size))
+    train_dataset = dataset.select(range(val_size, len(dataset)))
+    return train_dataset, val_dataset
+
+
+def categories_for_stage(stages: list[str], stage: str, cumulative: bool) -> set[str]:
+    if not cumulative:
+        return {stage}
+    pos = stages.index(stage)
+    return set(stages[: pos + 1])
+
+
+def prepare_prompt_dataset(dataset: Dataset, tokenizer, train: bool, seed: int) -> Dataset:
+    """Convert scored rows to tokenized conversational SFT examples.
+
+    The source format is still conversation-based: instruction/input/output are
+    first converted to system/user/assistant messages by pythoncodes_cl_scored.
+    Then we tokenize the rendered chat and write explicit labels, where all
+    system/user prompt tokens are -100. That keeps the assistant-only objective
+    without relying on the currently fragile Unsloth raw-messages path.
+    """
+    mapped = dataset.map(
+        pythoncodes_cl_scored.build_tokenized_chat,
+        fn_kwargs={"tokenizer": tokenizer, "max_length": config.MAX_TOKENS, "train": train},
+        remove_columns=list(dataset.column_names),
+        desc="Tokenizing scored pythoncodes conversations",
+    )
+    if train:
+        before = len(mapped)
+        mapped = mapped.filter(
+            pythoncodes_cl_scored.has_trainable_labels,
+            desc="Keeping rows with assistant labels",
+        )
+        dropped = before - len(mapped)
+        if dropped:
+            print(f"Dropped {dropped} rows with no assistant labels after truncation", flush=True)
+        mapped = mapped.shuffle(seed=seed)
+    return mapped
+
+def filter_stage(dataset: Dataset, category_col: str, wanted: set[str]) -> Dataset:
+    if category_col not in dataset.column_names:
+        raise KeyError(f"Column {category_col!r} not found. Available: {dataset.column_names}")
+    return dataset.filter(lambda row: row.get(category_col) in wanted)
+
+
+def cleanup_cuda() -> None:
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+
+
+
+def make_training_arguments(**kwargs) -> TrainingArguments:
+    """Build TrainingArguments/SFTConfig across TRL and Transformers releases."""
+    args_cls = SFTConfig if SFTConfig is not None else TrainingArguments
+    params = signature(args_cls.__init__).parameters
+
+    if "eval_strategy" not in params and "eval_strategy" in kwargs:
+        kwargs["evaluation_strategy"] = kwargs.pop("eval_strategy")
+    if "eval_strategy" in params and "evaluation_strategy" in kwargs:
+        kwargs["eval_strategy"] = kwargs.pop("evaluation_strategy")
+
+    # TRL renamed the sequence-length field. Keep both forms in the call site and
+    # retain whichever one the installed SFTConfig understands.
+    if "max_seq_length" in kwargs and "max_length" in params and "max_seq_length" not in params:
+        kwargs["max_length"] = kwargs.pop("max_seq_length")
+    if "max_length" in kwargs and "max_seq_length" in params and "max_length" not in params:
+        kwargs["max_seq_length"] = kwargs.pop("max_length")
+
+    filtered = {k: v for k, v in kwargs.items() if k in params}
+    return args_cls(**filtered)
+
+
+def make_sft_trainer(
+    *,
+    model,
+    tokenizer,
+    train_dataset: Dataset,
+    eval_dataset: Dataset,
+    args: TrainingArguments,
+    tcfg: dict[str, Any],
+    callbacks: list[TrainerCallback],
+) -> SFTTrainer:
+    """Construct SFTTrainer for both old and new TRL APIs.
+
+    Newer TRL versions removed the tokenizer= argument and expect
+    processing_class=tokenizer. SFT-specific fields are now usually carried by
+    SFTConfig instead of the trainer constructor.
+    """
+    params = signature(SFTTrainer.__init__).parameters
+    trainer_kwargs: dict[str, Any] = {
+        "model": model,
+        "train_dataset": train_dataset,
+        "eval_dataset": eval_dataset,
+        "args": args,
+        "callbacks": callbacks,
+        "data_collator": DataCollatorForSeq2Seq(
+            tokenizer=tokenizer,
+            label_pad_token_id=-100,
+            pad_to_multiple_of=8,
+        ),
+    }
+
+    if "processing_class" in params:
+        trainer_kwargs["processing_class"] = tokenizer
+    elif "tokenizer" in params:
+        trainer_kwargs["tokenizer"] = tokenizer
+
+    legacy_sft_kwargs = {
+        "max_seq_length": config.MAX_TOKENS,
+        "packing": bool(tcfg.get("packing", False)),
+        "assistant_only_loss": bool(tcfg.get("assistant_only_loss", True)),
+    }
+    for key, value in legacy_sft_kwargs.items():
+        if key in params:
+            trainer_kwargs[key] = value
+
+    return SFTTrainer(**trainer_kwargs)
+
+def train_one_run(
+    run_cfg: dict[str, Any],
+    full_train_dataset: Dataset,
+    full_val_dataset: Dataset,
+    cfg: dict[str, Any],
+    force: bool,
+) -> dict[str, Any]:
+    run_name = run_cfg["name"]
+    category_col = run_cfg["category_col"]
+    logger = make_logger(run_name)
+
+    model_slug = Path(config.MODEL_PATH).name
+    save_path = config.MODELS_DIR / f"{model_slug}-sft-{run_name}"
+    run_out = RUN_ROOT / run_name
+    tb_run = TB_ROOT / run_name
+    metrics_jsonl = run_out / "metrics.jsonl"
+
+    if force:
+        shutil.rmtree(save_path, ignore_errors=True)
+        shutil.rmtree(run_out, ignore_errors=True)
+        shutil.rmtree(tb_run, ignore_errors=True)
+
+    if save_path.exists() and (save_path / "adapter_config.json").exists():
+        logger.info("Adapter already exists: %s", save_path)
+        return {
+            "run_name": run_name,
+            "category_col": category_col,
+            "adapter_path": str(save_path),
+            "status": "skipped_exists",
+        }
+
+    run_out.mkdir(parents=True, exist_ok=True)
+    tb_run.mkdir(parents=True, exist_ok=True)
+
+    with tee_to_file(LOG_ROOT / f"{run_name}.stdout.log"):
+        logger.info("Starting run=%s category_col=%s", run_name, category_col)
+        logger.info("Base model: %s", config.MODEL_PATH)
+        logger.info("Output adapter: %s", save_path)
+
+        tcfg = cfg["training"]
+        lcfg = cfg["lora"]
+        ccfg = cfg["curriculum"]
+        mcfg = cfg["model"]
+        seed = int(tcfg.get("seed", cfg["dataset"].get("seed", 42)))
+        set_seed(seed)
+        random.seed(seed)
+
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=config.MODEL_PATH,
+            max_seq_length=config.MAX_TOKENS,
+            dtype=mcfg.get("dtype"),
+            load_in_4bit=bool(mcfg.get("load_in_4bit", True)),
+        )
+
+        model = FastLanguageModel.get_peft_model(
+            model,
+            r=int(lcfg.get("r", 32)),
+            target_modules=list(lcfg["target_modules"]),
+            lora_alpha=int(lcfg.get("alpha", 32)),
+            lora_dropout=float(lcfg.get("dropout", 0)),
+            bias=str(lcfg.get("bias", "none")),
+            use_gradient_checkpointing=lcfg.get("use_gradient_checkpointing", "unsloth"),
+        )
+
+        stages = list(ccfg.get("stages", ["easy", "medium", "hard"]))
+        cumulative = bool(ccfg.get("cumulative", False))
+        val_prompted = prepare_prompt_dataset(full_val_dataset, tokenizer, train=True, seed=seed)
+
+        final_train_result = None
+        for stage_idx, stage in enumerate(stages, start=1):
+            wanted = categories_for_stage(stages, stage, cumulative)
+            stage_raw = filter_stage(full_train_dataset, category_col, wanted)
+            if len(stage_raw) == 0:
+                logger.warning("Stage %s skipped: empty dataset for %s in %s", stage, category_col, sorted(wanted))
+                continue
+
+            train_prompted = prepare_prompt_dataset(stage_raw, tokenizer, train=True, seed=seed + stage_idx)
+            stage_name = f"{run_name}_stage_{stage_idx}_{stage}"
+            stage_dir = run_out / stage_name
+            stage_tb = tb_run / stage_name
+
+            logger.info(
+                "Stage %s/%s: %s | categories=%s | rows=%s | val_rows=%s",
+                stage_idx,
+                len(stages),
+                stage,
+                sorted(wanted),
+                len(train_prompted),
+                len(val_prompted),
+            )
+
+            args = make_training_arguments(
+                output_dir=str(stage_dir / "checkpoints"),
+                run_name=stage_name,
+                per_device_train_batch_size=int(tcfg.get("train_batch_size", 1)),
+                gradient_accumulation_steps=int(tcfg.get("gradient_steps", 8)),
+                max_steps=int(tcfg.get("stage_max_steps", tcfg.get("max_steps", 200))),
+                warmup_steps=int(tcfg.get("warmup_steps", 25)),
+                learning_rate=float(tcfg.get("lr", 2e-4)),
+                lr_scheduler_type=str(tcfg.get("lr_scheduler_type", "cosine")),
+                optim=str(tcfg.get("optim", "paged_adamw_8bit")),
+                fp16=not torch.cuda.is_bf16_supported(),
+                bf16=torch.cuda.is_bf16_supported(),
+                logging_strategy="steps",
+                logging_steps=int(tcfg.get("logging_steps", 10)),
+                eval_strategy="steps",
+                eval_steps=int(tcfg.get("eval_steps", 50)),
+                save_strategy="steps",
+                save_steps=int(tcfg.get("save_steps", 100)),
+                save_total_limit=int(tcfg.get("save_total_limit", 2)),
+                report_to=[str(tcfg.get("report_to", "tensorboard"))],
+                logging_dir=str(stage_tb),
+                dataloader_num_workers=int(tcfg.get("dataloader_num_workers", 2)),
+                dataloader_pin_memory=bool(tcfg.get("dataloader_pin_memory", True)),
+                max_grad_norm=float(tcfg.get("max_grad_norm", 1.0)),
+                seed=seed,
+                max_seq_length=config.MAX_TOKENS,
+                max_length=config.MAX_TOKENS,
+                packing=bool(tcfg.get("packing", False)),
+                assistant_only_loss=bool(tcfg.get("assistant_only_loss", True)),
+            )
+
+            trainer = make_sft_trainer(
+                model=model,
+                tokenizer=tokenizer,
+                train_dataset=train_prompted,
+                eval_dataset=val_prompted,
+                args=args,
+                tcfg=tcfg,
+                callbacks=[JsonlMetricCallback(metrics_jsonl, logger, tb_dir=stage_tb)],
+            )
+
+            final_train_result = trainer.train()
+            eval_metrics = trainer.evaluate()
+            logger.info("Stage %s final eval: %s", stage, eval_metrics)
+
+            with (run_out / f"{stage_name}_final_eval.json").open("w", encoding="utf-8") as f:
+                json.dump({k: _json_safe(v) for k, v in eval_metrics.items()}, f, indent=2, ensure_ascii=False)
+
+            del trainer, train_prompted, stage_raw
+            cleanup_cuda()
+
+        logger.info("Saving LoRA adapter: %s", save_path)
+        model.save_pretrained(str(save_path))
+        tokenizer.save_pretrained(str(save_path))
+
+        del model, tokenizer
+        cleanup_cuda()
+
+    status = "ok" if final_train_result is not None else "no_non_empty_stages"
+    return {
+        "run_name": run_name,
+        "category_col": category_col,
+        "adapter_path": str(save_path),
+        "metrics_jsonl": str(metrics_jsonl),
+        "tensorboard_dir": str(tb_run),
+        "status": status,
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default="configs/train/lora_pythoncodes_cl.yaml")
+    parser.add_argument("--only", nargs="*", default=None, help="Optional run names, e.g. cl_length cl_semantic")
+    parser.add_argument("--force", action="store_true", help="Delete existing adapters/logs for selected runs")
+    parser.add_argument("--local-files-only", action="store_true")
+    args = parser.parse_args()
+
+    cfg_path = resolve_path(args.config)
+    cfg = read_yaml(cfg_path)
+
+    LOG_ROOT.mkdir(parents=True, exist_ok=True)
+    RUN_ROOT.mkdir(parents=True, exist_ok=True)
+    TB_ROOT.mkdir(parents=True, exist_ok=True)
+    config.MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+    ensure_base_model(local_files_only=args.local_files_only)
+
+    dataset = load_scored_dataset(cfg)
+    train_dataset, val_dataset = split_dataset(dataset, cfg)
+    print(f"Loaded scored dataset: train={len(train_dataset)}, val={len(val_dataset)}", flush=True)
+
+    selected = set(args.only) if args.only else None
+    results = []
+    for run_cfg in cfg["runs"]:
+        if selected and run_cfg["name"] not in selected:
+            continue
+        cleanup_cuda()
+        result = train_one_run(run_cfg, train_dataset, val_dataset, cfg, force=args.force)
+        results.append(result)
+
+    manifest = pd.DataFrame(results)
+    manifest_path = RUN_ROOT / "trained_adapters.csv"
+    manifest.to_csv(manifest_path, index=False)
+    manifest.to_markdown(RUN_ROOT / "trained_adapters.md", index=False)
+    print(f"Saved training manifest: {manifest_path}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

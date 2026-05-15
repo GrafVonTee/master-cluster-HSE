@@ -1,0 +1,32 @@
+--- scripts/train_cl_lora_all.py	2026-05-15 19:36:28.774755721 +0000
++++ scripts/train_cl_lora_all.py	2026-05-15 19:34:46.760090712 +0000
+@@ -324,12 +309,10 @@
+     elif "tokenizer" in params:
+         trainer_kwargs["tokenizer"] = tokenizer
+ 
+-    # The dataset is already tokenized and carries explicit labels. Do not ask
+-    # TRL/Unsloth to infer assistant masks again; that path currently falls into
+-    # the raw conversational formatting_func error on this image.
+     legacy_sft_kwargs = {
+         "max_seq_length": config.MAX_TOKENS,
+         "packing": bool(tcfg.get("packing", False)),
++        "assistant_only_loss": bool(tcfg.get("assistant_only_loss", False)),
+     }
+     for key, value in legacy_sft_kwargs.items():
+         if key in params:
+@@ -452,14 +435,11 @@
+                 dataloader_num_workers=int(tcfg.get("dataloader_num_workers", 2)),
+                 dataloader_pin_memory=bool(tcfg.get("dataloader_pin_memory", True)),
+                 max_grad_norm=float(tcfg.get("max_grad_norm", 1.0)),
+-                remove_unused_columns=False,
+                 seed=seed,
+                 max_seq_length=config.MAX_TOKENS,
+                 max_length=config.MAX_TOKENS,
+                 packing=bool(tcfg.get("packing", False)),
+-                # Labels already contain the assistant-only mask. Keeping this
+-                # False prevents TRL/Unsloth from trying to build a second mask.
+-                assistant_only_loss=False,
++                assistant_only_loss=bool(tcfg.get("assistant_only_loss", False)),
+             )
+ 
+             trainer = make_sft_trainer(

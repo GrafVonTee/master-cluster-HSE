@@ -1,8 +1,10 @@
-from src.config import DATASETS_DIR
-from datasets import load_dataset
-from src.data.types import CodingTask
 import re
-from typing import List, Optional
+from typing import List
+
+from datasets import load_dataset
+
+from src.config import DATASETS_DIR
+from src.data.types import CodingTask
 
 
 def get_dataset():
@@ -14,6 +16,19 @@ def get_prepared_dataset(tokenizer):
     return humaneval.map(build_prompt, fn_kwargs={"tokenizer": tokenizer})
 
 
+def _apply_chat_template(tokenizer, messages) -> str:
+    kwargs = {
+        "tokenize": False,
+        "add_generation_prompt": True,
+        "enable_thinking": False,
+    }
+    try:
+        return tokenizer.apply_chat_template(messages, **kwargs)
+    except TypeError:
+        kwargs.pop("enable_thinking", None)
+        return tokenizer.apply_chat_template(messages, **kwargs)
+
+
 def build_prompt(example: dict, tokenizer) -> str:
     task_id = example.get("task_id", "")
     task_text = example["prompt"].rstrip()
@@ -21,20 +36,18 @@ def build_prompt(example: dict, tokenizer) -> str:
 
     system_msg = (
         "You are an expert Python coding assistant. "
-        "You will be given a Python file snippet containing imports and a single function "
-        "signature with a docstring. Complete the function implementation so it is correct."
+        "You will be given a Python file snippet containing imports and a single function signature with a docstring. "
+        "Complete the function implementation so it is correct."
     )
 
     user_msg = (
         f"Task ID: {task_id}\n"
         f"Function to implement: {entry_point}\n\n"
         "Complete the following code by writing the function body.\n"
-        "1. First, analyze the problem and plan your solution inside <think>...</think> tags.\n"
-        "2. Then, provide the implementation inside a markdown code block (```python ... ```).\n"
-        "\nConstraints:\n"
-        "- Keep all existing imports, the function name, and its arguments unchanged.\n"
-        "- Do not modify the docstring.\n"
-        "- You may add local helper functions if needed, but do not change the target signature.\n\n"
+        "Return only the final implementation inside a markdown Python code block.\n"
+        "Keep all existing imports, the function name, and its arguments unchanged.\n"
+        "Do not modify the docstring.\n"
+        "You may add local helper functions if needed, but do not change the target signature.\n\n"
         "Code:\n"
         f"{task_text}\n"
     )
@@ -44,16 +57,10 @@ def build_prompt(example: dict, tokenizer) -> str:
         {"role": "user", "content": user_msg},
     ]
 
-    prompt = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True,
-    )
-    return prompt
+    return _apply_chat_template(tokenizer, messages)
 
 
 def extract_tests(test_str: str) -> List[str]:
-    """Парсит asserts из строки тестов (для HumanEval)."""
     if not test_str:
         return []
 
@@ -62,7 +69,6 @@ def extract_tests(test_str: str) -> List[str]:
     i = 0
     while i < len(lines):
         line = lines[i]
-        # Ваша логика с балансом скобок для многострочных assert
         if re.match(r"^\s*assert\b", line):
             buf = [line.rstrip()]
             i += 1
@@ -86,17 +92,13 @@ def extract_tests(test_str: str) -> List[str]:
 
 def humaneval_to_task(row: dict, tokenizer) -> CodingTask:
     prompt_str = build_prompt(row, tokenizer)
-
-    # ВАЖНО: Используем парсер здесь.
-    # Теперь executor получит список ['assert x==1', 'assert x==2']
-    # Добавляем контекст candidate = entry_point, который был в test_execute
-    entry_point = row['entry_point']
-    raw_tests = extract_tests(row['test'])
+    entry_point = row["entry_point"]
+    raw_tests = extract_tests(row["test"])
     prepared_tests = [f"candidate = {entry_point}\n{t}" for t in raw_tests]
 
     return CodingTask(
         prompt=prompt_str,
-        canonical_solution=row['canonical_solution'],
+        canonical_solution=row["canonical_solution"],
         tests=prepared_tests,
-        stop_tokens=["\nclass", "\ndef", "\n#", "if __name__"]
+        stop_tokens=["\nclass", "\ndef", "\n#", "if __name__"],
     )
