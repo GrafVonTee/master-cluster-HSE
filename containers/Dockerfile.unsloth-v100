@@ -1,0 +1,31 @@
+# V100-oriented training image.
+# Keep this image separate from the local RTX 4070 Ti Super image.
+# The code is mounted at runtime to /workspace; the image only carries dependencies.
+
+ARG BASE_IMAGE=unsloth/unsloth:2026.4.8-pt2.10.0-vllm-0.16.0-cu12.8-studio-release-v0.1.37-beta-fix-startup
+FROM ${BASE_IMAGE}
+
+WORKDIR /workspace
+
+ENV PYTHONPATH=/workspace \
+    PROJECT_DIR=/workspace \
+    HF_HOME=/workspace/.cache/huggingface \
+    HF_DATASETS_CACHE=/workspace/.cache/hf_datasets \
+    VLLM_CACHE_ROOT=/workspace/.cache/vllm \
+    TORCH_EXTENSIONS_DIR=/workspace/.cache/torch_extensions \
+    XDG_CACHE_HOME=/workspace/.cache \
+    TOKENIZERS_PARALLELISM=false \
+    CUDA_DEVICE_ORDER=PCI_BUS_ID \
+    TORCH_CUDA_ARCH_LIST="7.0" \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+    MAX_TOKENS=2048 \
+    GPU_MEMORY_UTILIZATION=0.95
+
+# Do not reinstall torch/unsloth here. The base image is already coherent.
+# Add only project-side utilities that our scripts use.
+RUN python -m pip install --no-cache-dir --upgrade pip && \
+    python -m pip install --no-cache-dir \
+      pandas pyarrow pyyaml tqdm tabulate tensorboard \
+      orjson jsonlines scikit-learn matplotlib
+
+CMD ["/bin/bash"]

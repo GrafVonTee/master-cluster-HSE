@@ -231,7 +231,7 @@ def load_scored_dataset(cfg: dict[str, Any]) -> Dataset:
 
     limit = _int_env("TRAIN_DATASET_LIMIT_OVERRIDE", ds_cfg.get("limit"))
     if limit:
-        dataset = dataset.select(range(min(int(limit), len(dataset))), keep_in_memory=True)
+        dataset = dataset.select(range(min(int(limit), len(dataset))))
 
     return dataset
 
@@ -244,8 +244,8 @@ def split_dataset(dataset: Dataset, cfg: dict[str, Any]) -> tuple[Dataset, Datas
 
     dataset = dataset.shuffle(seed=seed, keep_in_memory=True)
     val_size = min(int(val_size), max(1, len(dataset) // 10), len(dataset) - 1)
-    val_dataset = dataset.select(range(val_size), keep_in_memory=True)
-    train_dataset = dataset.select(range(val_size, len(dataset)), keep_in_memory=True)
+    val_dataset = dataset.select(range(val_size))
+    train_dataset = dataset.select(range(val_size, len(dataset)))
     return train_dataset, val_dataset
 
 
@@ -258,14 +258,14 @@ def cleanup_cuda() -> None:
 
 def _dataset_select_by_indices(dataset: Dataset, indices: list[int]) -> Dataset:
     if not indices:
-        return dataset.select([], keep_in_memory=True)
-    return dataset.select(indices, keep_in_memory=True)
+        return dataset.select([])
+    return dataset.select(indices)
 
 
 def filter_stage(dataset: Dataset, category_col: str, wanted: set[str]) -> Dataset:
     if category_col not in dataset.column_names:
         raise KeyError(f"Column {category_col!r} not found. Available: {dataset.column_names}")
-    return dataset.filter(lambda row: row.get(category_col) in wanted, keep_in_memory=True)
+    return dataset.filter(lambda row: row.get(category_col) in wanted)
 
 
 def sample_distribution_stage(
@@ -285,7 +285,7 @@ def sample_distribution_stage(
             by_cat[value].append(i)
 
     if not any(by_cat.values()):
-        return dataset.select([], keep_in_memory=True)
+        return dataset.select([])
 
     # Normalize weights after dropping empty categories.
     active = {cat: w for cat, w in weights.items() if by_cat.get(cat)}
@@ -390,10 +390,9 @@ def prepare_tokenized_dataset(dataset: Dataset, tokenizer, train: bool, seed: in
         fn_kwargs={"tokenizer": tokenizer, "max_length": config.MAX_TOKENS, "train": train},
         remove_columns=list(dataset.column_names),
         desc="Tokenizing scored pythoncodes chats",
-        keep_in_memory=True,
     )
     if train:
-        mapped = mapped.shuffle(seed=seed, keep_in_memory=True)
+        mapped = mapped.shuffle(seed=seed)
     return mapped
 
 
