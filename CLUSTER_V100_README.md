@@ -1,99 +1,77 @@
-# V100 cluster layer
+# V100 cluster training/eval layer
 
-This layer keeps the local RTX/Docker Compose workflow untouched and adds a separate V100/Singularity workflow.
+Assumptions:
 
-## 1. Build Docker images locally
+- Project path on login node: `~/master-cluster-HSE`.
+- SIF images already exist:
+  - `containers/sif/unsloth-v100.sif`
+  - `containers/sif/vllm-v100.sif`
+- Base model exists: `models/qwen3-4b`.
+- Scored dataset exists: `datasets/pythoncodes_cl_scored`.
+- Compute nodes do not have internet, so jobs run with offline Hugging Face env flags.
 
-```bash
-bash scripts/cluster_build_docker_images_local.sh
-```
-
-Artifacts:
-
-```text
-containers/image_archives/unsloth-v100.tar.gz
-containers/image_archives/vllm-v100.tar.gz
-```
-
-Copy them to the cluster repository directory, for example:
+## Smoke checks
 
 ```bash
-scp containers/image_archives/*.tar.gz USER@CLUSTER:/path/to/master-cluster-HSE/containers/image_archives/
+cd ~/master-cluster-HSE
+sbatch jobs/20_smoke_unsloth_v100.sbatch
+sbatch jobs/21_smoke_vllm_v100.sbatch
+squeue -u "$USER"
+tail -f logs/slurm/smoke-unsloth-v100-*.out
 ```
 
-## 2. Build Singularity images on login node
+Optional 1-step train smoke:
 
 ```bash
-bash scripts/cluster_build_singularity_from_archives.sh
+sbatch jobs/22_smoke_train_one_v100.sbatch
 ```
 
-This creates both sandbox directories and SIF files:
-
-```text
-containers/sandboxes/unsloth-v100
-containers/sandboxes/vllm-v100
-containers/sif/unsloth-v100.sif
-containers/sif/vllm-v100.sif
-```
-
-The Slurm scripts use sandbox directories by default to avoid runtime SIF-to-sandbox conversion overhead.
-
-## 3. Generate matrices
+Optional base eval smoke:
 
 ```bash
-python scripts/cluster_make_run_matrices.py --config configs/train/lora_pythoncodes_cl.yaml
+sbatch jobs/23_smoke_eval_base_v100.sbatch
 ```
 
-Expected counts:
-
-```text
-outputs/cluster/train_runs.txt       # 16 lines
-outputs/cluster/eval_experiments.txt # 17 lines, base + 16 train runs
-```
-
-## 4. Smoke test on cluster
-
-Use a 1-task array range manually:
+## Run full 16 train + 17 eval pipeline
 
 ```bash
-sbatch --array=1-1%1 --partition=test --time=00:30:00 \
-  --export=ALL,TRAIN_MAX_STEPS_OVERRIDE=2,TRAIN_DATASET_LIMIT_OVERRIDE=900,TRAIN_VAL_SIZE_OVERRIDE=100 \
-  slurm/train_array_v100.sbatch
+python3 -u scripts/cluster_make_run_matrices.py --config configs/train/lora_pythoncodes_cl.yaml
+
+TRAIN_JOB=$(sbatch --parsable --array=1-16%4 jobs/31_train_array_v100.sbatch)
+echo "TRAIN_JOB=$TRAIN_JOB"
+
+EVAL_JOB=$(sbatch --parsable --dependency=afterok:${TRAIN_JOB} --array=1-17%4 --export=ALL,EVAL_MAX_NEW_TOKENS=1024 jobs/32_eval_array_v100.sbatch)
+echo "EVAL_JOB=$EVAL_JOB"
+
+MERGE_JOB=$(sbatch --parsable --dependency=afterok:${EVAL_JOB} jobs/33_merge_results_v100.sbatch)
+echo "MERGE_JOB=$MERGE_JOB"
 ```
 
-Then eval smoke:
+Shortcut:
 
 ```bash
-sbatch --array=1-1%1 --partition=test --time=00:30:00 \
-  --export=ALL,EVAL_MAX_NEW_TOKENS=128 \
-  slurm/eval_array_v100.sbatch
+EVAL_MAX_NEW_TOKENS=1024 TRAIN_CONCURRENCY=4 EVAL_CONCURRENCY=4 bash scripts/cluster_submit_v100_pipeline.sh
 ```
 
-## 5. Full train array
+## Outputs
 
-```bash
-TRAIN_JOB=$(sbatch --parsable slurm/train_array_v100.sbatch)
-echo $TRAIN_JOB
-```
+Training:
 
-## 6. Full eval array after successful train array
+- `models/qwen3-4b-sft-*`
+- `logs/train/*.log`
+- `logs/train/*.stdout.log`
+- `outputs/train_runs/<run_name>/metrics.jsonl`
+- `outputs/train_runs/<run_name>/stage_summary.csv`
+- merged: `outputs/train_runs/trained_adapters.csv`
+- merged: `outputs/train_runs/train_stage_summary_all.csv`
 
-```bash
-EVAL_JOB=$(sbatch --parsable --dependency=afterok:$TRAIN_JOB slurm/eval_array_v100.sbatch)
-echo $EVAL_JOB
-```
+Evaluation:
 
-## 7. Merge eval parts
+- per-array-task parts: `outputs/eval_jobs/<experiment>/eval/lora_eval_summary.csv`
+- merged: `outputs/eval/lora_eval_summary.csv`
+- merged: `outputs/eval/lora_eval_comparison.csv`
+- pivots: `outputs/eval/pivot_*.csv`
 
-```bash
-sbatch --dependency=afterok:$EVAL_JOB slurm/merge_eval_v100.sbatch
-```
+## Notes
 
-Final outputs:
-
-```text
-outputs/eval/lora_eval_summary.csv
-outputs/eval/lora_eval_summary.md
-outputs/eval/lora_eval_comparison.csv
-outputs/eval/lora_eval_comparison.md
-```
+Array jobs use one V100 per task and up to four concurrent tasks (`%4`). Change `%4` to `%1` or `%2` if the queue/storage is unstable.

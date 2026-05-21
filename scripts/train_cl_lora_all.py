@@ -735,10 +735,27 @@ def main() -> int:
         results.append(result)
 
     manifest = pd.DataFrame(results)
-    manifest_path = RUN_ROOT / "trained_adapters.csv"
-    manifest.to_csv(manifest_path, index=False)
-    manifest.to_markdown(RUN_ROOT / "trained_adapters.md", index=False)
-    print(f"Saved training manifest: {manifest_path}")
+    manifests_dir = RUN_ROOT / "manifests"
+    manifests_dir.mkdir(parents=True, exist_ok=True)
+
+    # In Slurm array mode each task trains exactly one run. Avoid concurrent writes
+    # to one shared trained_adapters.csv; write one small manifest per task instead.
+    cluster_mode = os.environ.get("CLUSTER_ARRAY_MODE", "") == "1"
+    if cluster_mode or (selected and len(results) == 1):
+        for result in results:
+            run_name = str(result.get("run_name", "unknown"))
+            per_run = pd.DataFrame([result])
+            per_csv = manifests_dir / f"{run_name}.csv"
+            per_json = manifests_dir / f"{run_name}.json"
+            per_csv.parent.mkdir(parents=True, exist_ok=True)
+            per_run.to_csv(per_csv, index=False)
+            per_json.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+            print(f"Saved per-run training manifest: {per_csv}")
+    else:
+        manifest_path = RUN_ROOT / "trained_adapters.csv"
+        manifest.to_csv(manifest_path, index=False)
+        manifest.to_markdown(RUN_ROOT / "trained_adapters.md", index=False)
+        print(f"Saved training manifest: {manifest_path}")
     return 0
 
 

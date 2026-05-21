@@ -4,33 +4,19 @@ from pathlib import Path
 
 PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", Path.cwd())).expanduser().resolve()
 
-MODELS_DIR = Path(os.environ.get("MODELS_DIR", PROJECT_DIR / "models")).expanduser()
-if str(MODELS_DIR) == "/workspace" or str(MODELS_DIR).startswith("/workspace/"):
-    MODELS_DIR = PROJECT_DIR / "models"
 
-DATASETS_DIR = Path(os.environ.get("DATASETS_DIR", PROJECT_DIR / "datasets")).expanduser()
-if str(DATASETS_DIR) == "/workspace" or str(DATASETS_DIR).startswith("/workspace/"):
-    DATASETS_DIR = PROJECT_DIR / "datasets"
+def _path_env(name: str, default: Path) -> Path:
+    return Path(os.environ.get(name, str(default))).expanduser()
 
-OUTPUTS_DIR = Path(os.environ.get("OUTPUTS_DIR", PROJECT_DIR / "outputs")).expanduser()
-if str(OUTPUTS_DIR) == "/workspace" or str(OUTPUTS_DIR).startswith("/workspace/"):
-    OUTPUTS_DIR = PROJECT_DIR / "outputs"
 
-LOGS_DIR = Path(os.environ.get("LOGS_DIR", PROJECT_DIR / "logs")).expanduser()
-if str(LOGS_DIR) == "/workspace" or str(LOGS_DIR).startswith("/workspace/"):
-    LOGS_DIR = PROJECT_DIR / "logs"
+MODELS_DIR = _path_env("MODELS_DIR", PROJECT_DIR / "models")
+DATASETS_DIR = _path_env("DATASETS_DIR", PROJECT_DIR / "datasets")
+OUTPUTS_DIR = _path_env("OUTPUTS_DIR", PROJECT_DIR / "outputs")
+LOGS_DIR = _path_env("LOGS_DIR", PROJECT_DIR / "logs")
 
-HF_HOME = Path(os.environ.get("HF_HOME", PROJECT_DIR / ".cache" / "huggingface")).expanduser()
-if str(HF_HOME) == "/workspace" or str(HF_HOME).startswith("/workspace/"):
-    HF_HOME = PROJECT_DIR / ".cache" / "huggingface"
-
-HF_DATASETS_CACHE = Path(os.environ.get("HF_DATASETS_CACHE", HF_HOME / "datasets")).expanduser()
-if str(HF_DATASETS_CACHE) == "/workspace" or str(HF_DATASETS_CACHE).startswith("/workspace/"):
-    HF_DATASETS_CACHE = HF_HOME / "datasets"
-
-VLLM_CACHE_ROOT = Path(os.environ.get("VLLM_CACHE_ROOT", PROJECT_DIR / ".cache" / "vllm")).expanduser()
-if str(VLLM_CACHE_ROOT) == "/workspace" or str(VLLM_CACHE_ROOT).startswith("/workspace/"):
-    VLLM_CACHE_ROOT = PROJECT_DIR / ".cache" / "vllm"
+HF_HOME = _path_env("HF_HOME", PROJECT_DIR / ".cache" / "huggingface")
+HF_DATASETS_CACHE = _path_env("HF_DATASETS_CACHE", HF_HOME / "datasets")
+VLLM_CACHE_ROOT = _path_env("VLLM_CACHE_ROOT", PROJECT_DIR / ".cache" / "vllm")
 
 for p in [
     MODELS_DIR,
@@ -45,6 +31,10 @@ for p in [
 
 
 MODELS = {
+    "4b": {
+        "name": "Qwen/Qwen3-4B",
+        "path": str(MODELS_DIR / "qwen3-4b"),
+    },
     "4b-instruct": {
         "name": "Qwen/Qwen3-4B-Instruct-2507",
         "path": str(MODELS_DIR / "qwen3-4b-instruct-2507"),
@@ -64,7 +54,7 @@ MODELS = {
 }
 
 
-SELECTED_MODEL = os.environ.get("SELECTED_MODEL", "4b-instruct")
+SELECTED_MODEL = os.environ.get("SELECTED_MODEL", "4b")
 
 if SELECTED_MODEL not in MODELS:
     raise ValueError(f"Unknown SELECTED_MODEL={SELECTED_MODEL}. Available: {list(MODELS)}")

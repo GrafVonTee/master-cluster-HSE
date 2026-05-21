@@ -1,0 +1,41 @@
+#!/bin/bash
+#SBATCH --job-name=merge-cl-v100
+#SBATCH --output=logs/slurm/merge-cl-v100-%j.out
+#SBATCH --error=logs/slurm/merge-cl-v100-%j.err
+#SBATCH --time=00:20:00
+#SBATCH --partition=test
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=2
+
+set -euo pipefail
+
+PROJECT_DIR="${PROJECT_DIR:-$HOME/master-cluster-HSE}"
+IMAGE="$PROJECT_DIR/containers/sif/vllm-v100.sif"
+cd "$PROJECT_DIR"
+
+module purge
+module load singularity/3.9.0
+
+mkdir -p logs/slurm outputs/eval outputs/train_runs .home .cache/huggingface
+
+echo "===== MERGE JOB ====="
+echo "job=${SLURM_JOB_ID:-none} node=${SLURMD_NODENAME:-unknown} host=$(hostname)"
+echo "image=$IMAGE"
+
+test -f "$IMAGE" || { echo "Missing image: $IMAGE"; exit 1; }
+
+singularity exec --cleanenv \
+  --bind "$PROJECT_DIR:/workspace" \
+  --env PROJECT_DIR=/workspace \
+  --env PYTHONPATH=/workspace \
+  --env MODELS_DIR=/workspace/models \
+  --env DATASETS_DIR=/workspace/datasets \
+  --env OUTPUTS_DIR=/workspace/outputs \
+  --env LOGS_DIR=/workspace/logs \
+  --env HOME=/workspace/.home \
+  --env HF_HOME=/workspace/.cache/huggingface \
+  --env SELECTED_MODEL=4b \
+  --env PYTHONUNBUFFERED=1 \
+  "$IMAGE" \
+  bash -lc 'cd /workspace && python -u scripts/cluster_merge_train_parts.py && python -u scripts/cluster_merge_eval_parts.py'
