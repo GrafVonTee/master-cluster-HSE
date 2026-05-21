@@ -22,7 +22,6 @@ import datasets
 import pandas as pd
 import torch
 try:
-try:
     from torch.utils.tensorboard import SummaryWriter
 except Exception:
     class SummaryWriter:
