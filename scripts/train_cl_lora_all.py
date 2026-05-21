@@ -40,7 +40,7 @@ import yaml
 from datasets import Dataset, load_dataset, load_from_disk
 from huggingface_hub import snapshot_download
 try:
-    try:
+try:
     from torch.utils.tensorboard import SummaryWriter
 except Exception:
     class SummaryWriter:
