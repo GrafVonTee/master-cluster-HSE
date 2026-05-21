@@ -21,7 +21,28 @@ from typing import Any
 import datasets
 import pandas as pd
 import torch
-from torch.utils.tensorboard import SummaryWriter
+try:
+    from torch.utils.tensorboard import SummaryWriter
+except Exception:
+    class SummaryWriter:
+        def __init__(self, *args, **kwargs):
+            pass
+        def add_scalar(self, *args, **kwargs):
+            pass
+        def add_text(self, *args, **kwargs):
+            pass
+        def add_hparams(self, *args, **kwargs):
+            pass
+        def flush(self):
+            pass
+        def close(self):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            self.close()
+            return False
+
 
 import src.config as config
 from src.data.loader import load_benchmark
