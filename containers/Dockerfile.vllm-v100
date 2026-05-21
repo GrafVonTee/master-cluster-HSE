@@ -19,6 +19,7 @@ RUN ln -sf "$(command -v python3)" /usr/local/bin/python && \
     pandas \
     pyarrow \
     pyyaml \
+    tensorboard \
     tabulate \
     datasets \
     evaluate \

@@ -2,8 +2,8 @@
 #SBATCH --job-name=smoke-eval-v100
 #SBATCH --output=logs/slurm/smoke-eval-v100-%j.out
 #SBATCH --error=logs/slurm/smoke-eval-v100-%j.err
-#SBATCH --time=00:10:00
-#SBATCH --partition=test
+#SBATCH --time=00:30:00
+#SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gpus=1
