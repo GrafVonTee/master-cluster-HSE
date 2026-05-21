@@ -14,4 +14,10 @@ PROJECT_DIR="${PROJECT_DIR:-$HOME/master-cluster-HSE}"
 CONFIG="${CONFIG:-configs/train/lora_pythoncodes_cl.yaml}"
 cd "$PROJECT_DIR"
 mkdir -p logs/slurm outputs/cluster
-python3 -u scripts/cluster_make_run_matrices.py --config "$CONFIG"
+singularity exec --cleanenv \
+  --bind "$PWD:/workspace" \
+  --env PYTHONPATH=/workspace \
+  --env HOME=/workspace/.home \
+  --env HF_HOME=/workspace/.cache/huggingface \
+  containers/sif/vllm-v100.sif \
+  bash -lc "cd /workspace && python -u scripts/cluster_make_run_matrices.py --config '$CONFIG'" 

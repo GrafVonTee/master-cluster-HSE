@@ -24,7 +24,13 @@ module load singularity/3.9.0
 mkdir -p logs/slurm logs/train outputs/train_runs outputs/runs/train models datasets .home .cache/huggingface .cache/torch .cache/triton .cache/torchinductor
 
 if [ ! -f "$MATRIX" ]; then
-  python3 -u scripts/cluster_make_run_matrices.py --config "$CONFIG"
+  singularity exec --cleanenv \
+  --bind "$PWD:/workspace" \
+  --env PYTHONPATH=/workspace \
+  --env HOME=/workspace/.home \
+  --env HF_HOME=/workspace/.cache/huggingface \
+  containers/sif/vllm-v100.sif \
+  bash -lc "cd /workspace && python -u scripts/cluster_make_run_matrices.py --config '$CONFIG'" 
 fi
 
 RUN_NAME=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "$MATRIX")

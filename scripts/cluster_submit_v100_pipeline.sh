@@ -6,7 +6,13 @@ TRAIN_CONCURRENCY="${TRAIN_CONCURRENCY:-4}"
 EVAL_CONCURRENCY="${EVAL_CONCURRENCY:-4}"
 EVAL_MAX_NEW_TOKENS="${EVAL_MAX_NEW_TOKENS:-1024}"
 
-python3 -u scripts/cluster_make_run_matrices.py --config "$CONFIG"
+singularity exec --cleanenv \
+  --bind "$PWD:/workspace" \
+  --env PYTHONPATH=/workspace \
+  --env HOME=/workspace/.home \
+  --env HF_HOME=/workspace/.cache/huggingface \
+  containers/sif/vllm-v100.sif \
+  bash -lc "cd /workspace && python -u scripts/cluster_make_run_matrices.py --config '$CONFIG'" 
 
 TRAIN_N=$(wc -l < outputs/cluster/train_runs.txt | tr -d ' ')
 EVAL_N=$(wc -l < outputs/cluster/eval_experiments.txt | tr -d ' ')
