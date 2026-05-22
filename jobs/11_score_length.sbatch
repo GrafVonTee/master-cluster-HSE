@@ -10,6 +10,14 @@
 
 set -euo pipefail
 
+# Avoid small compute-node /tmp. Some Singularity installations extract SIF
+# into a temporary sandbox, which can easily exceed /tmp/job-* space.
+export SINGULARITY_CACHEDIR="$PWD/.singularity/cache"
+export SINGULARITY_TMPDIR="$PWD/.singularity/tmp/${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID:-0}"
+mkdir -p "$SINGULARITY_CACHEDIR" "$SINGULARITY_TMPDIR"
+trap 'rm -rf "$SINGULARITY_TMPDIR"' EXIT
+
+
 PROJECT_DIR="$HOME/master-cluster-HSE"
 IMAGE="$PROJECT_DIR/containers/current-sandbox"
 CONFIG="${1:-configs/score_pythoncodes_cluster.yaml}"
