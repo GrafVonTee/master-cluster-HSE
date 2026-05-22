@@ -11,6 +11,11 @@
 #SBATCH --array=1-17%4
 
 set -euo pipefail
+export EVAL_ENABLE_LOGPROBS="${EVAL_ENABLE_LOGPROBS:-0}"
+export TORCHDYNAMO_DISABLE=1
+export TORCH_COMPILE_DISABLE=1
+export TORCHINDUCTOR_DISABLE=1
+
 
 # Avoid small compute-node /tmp. Some Singularity installations extract SIF
 # into a temporary sandbox, which can easily exceed /tmp/job-* space.
@@ -98,6 +103,10 @@ srun singularity exec --nv --cleanenv \
   --env TOKENIZERS_PARALLELISM=false \
   --env SELECTED_MODEL=4b \
   --env MAX_TOKENS=2048 \
+  --env EVAL_ENABLE_LOGPROBS="${EVAL_ENABLE_LOGPROBS:-0}" \
+  --env TORCHDYNAMO_DISABLE=1 \
+  --env TORCH_COMPILE_DISABLE=1 \
+  --env TORCHINDUCTOR_DISABLE=1 \
   --env EVAL_MAX_NEW_TOKENS="$NEW_TOKENS" \
   --env PYTHONUNBUFFERED=1 \
   "$IMAGE" \

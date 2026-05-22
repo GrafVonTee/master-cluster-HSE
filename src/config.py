@@ -76,11 +76,13 @@ VLLM_PARAMS = {
 }
 
 
+EVAL_ENABLE_LOGPROBS = os.environ.get("EVAL_ENABLE_LOGPROBS", "0").strip().lower()
+EVAL_ENABLE_LOGPROBS = EVAL_ENABLE_LOGPROBS in {"1", "true", "yes", "on"}
 SAMPLING_SETTINGS = {
     "max_tokens": int(os.environ.get("EVAL_MAX_NEW_TOKENS", "512") or "512"),
     "ignore_eos": False,
     "detokenize": True,
-    "logprobs": 1,
+    "logprobs": 1 if EVAL_ENABLE_LOGPROBS else None,
     "repetition_penalty": 1,
 }
 

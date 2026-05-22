@@ -59,7 +59,7 @@ def make_sampling_params(
     *,
     n: int = 1,
     temperature: float = 0.0,
-    logprobs: int | None = 1,
+    logprobs: int | None = None,
     max_tokens: int | None = None,
 ):
     if max_tokens is None:
