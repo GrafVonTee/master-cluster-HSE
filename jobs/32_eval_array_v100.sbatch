@@ -37,7 +37,7 @@ mkdir -p logs/slurm outputs/eval_jobs logs/eval_jobs models datasets .home .cach
 if [ ! -f "$MATRIX" ]; then
   singularity exec --cleanenv \
   --bind "$PWD:/workspace" \
-  --env PYTHONPATH=/workspace \
+  --env PYTHONPATH=/workspace:/workspace/.python_metadata \
   --env HOME=/workspace/.home \
   --env HF_HOME=/workspace/.cache/huggingface \
   containers/sif/vllm-v100.sif \
@@ -82,7 +82,7 @@ fi
 srun singularity exec --nv --cleanenv \
   --bind "$PROJECT_DIR:/workspace" \
   --env PROJECT_DIR=/workspace \
-  --env PYTHONPATH=/workspace \
+  --env PYTHONPATH=/workspace:/workspace/.python_metadata \
   --env MODELS_DIR=/workspace/models \
   --env DATASETS_DIR=/workspace/datasets \
   --env OUTPUTS_DIR="$EXPERIMENT_OUTPUTS" \

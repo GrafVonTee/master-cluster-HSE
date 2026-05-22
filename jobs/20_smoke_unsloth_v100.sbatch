@@ -39,7 +39,7 @@ test -f "$IMAGE" || { echo "Missing image: $IMAGE"; exit 1; }
 srun singularity exec --nv --cleanenv \
   --bind "$PROJECT_DIR:/workspace" \
   --env PROJECT_DIR=/workspace \
-  --env PYTHONPATH=/workspace \
+  --env PYTHONPATH=/workspace:/workspace/.python_metadata \
   --env HOME=/workspace/.home \
   --env HF_HOME=/workspace/.cache/huggingface \
   --env HF_DATASETS_CACHE=/workspace/.cache/huggingface/datasets \

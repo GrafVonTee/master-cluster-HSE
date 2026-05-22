@@ -24,7 +24,7 @@ cd "$PROJECT_DIR"
 mkdir -p logs/slurm outputs/cluster
 singularity exec --cleanenv \
   --bind "$PWD:/workspace" \
-  --env PYTHONPATH=/workspace \
+  --env PYTHONPATH=/workspace:/workspace/.python_metadata \
   --env HOME=/workspace/.home \
   --env HF_HOME=/workspace/.cache/huggingface \
   containers/sif/vllm-v100.sif \
