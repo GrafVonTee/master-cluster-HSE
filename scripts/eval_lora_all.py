@@ -188,31 +188,26 @@ def prepare_experiments(only: set[str] | None = None, include_base: bool = False
     return sorted(experiments, key=lambda x: (order.get(x[0], 99), x[0]))
 
 
-def load_raw_benchmark(name: str):
-    local_map = {
-        "mbpp": config.DATASETS_DIR / "mbpp_sanitized_test",
-        "humaneval": config.DATASETS_DIR / "humaneval_test",
-    }
-    local_path = local_map.get(name)
-    if local_path and local_path.exists():
-        return datasets.load_from_disk(str(local_path))
+def load_raw_benchmark(benchmark: str):
+    import datasets
+    from pathlib import Path
+
+    name = str(benchmark).lower().strip()
+    local_root = Path("/workspace/datasets")
 
     if name == "mbpp":
-        return datasets.load_dataset(
-            "google-research-datasets/mbpp",
-            "sanitized",
-            split="test",
-            cache_dir=str(config.DATASETS_DIR),
-        )
-    if name == "humaneval":
-        return datasets.load_dataset(
-            "openai/openai_humaneval",
-            split="test",
-            cache_dir=str(config.DATASETS_DIR),
-        )
+        local_path = local_root / "mbpp"
+        if local_path.exists():
+            return datasets.load_from_disk(str(local_path))
+        return datasets.load_dataset("google-research-datasets/mbpp")
 
-    raise ValueError(f"Unknown benchmark: {name}")
+    if name in {"humaneval", "human_eval", "openai_humaneval"}:
+        local_path = local_root / "humaneval"
+        if local_path.exists():
+            return datasets.load_from_disk(str(local_path))
+        return datasets.load_dataset("openai/openai_humaneval")
 
+    raise ValueError(f"Unknown benchmark: {benchmark!r}")
 
 def build_tasks(benchmark: str, raw_dataset, tokenizer, limit: int | None):
     if benchmark == "mbpp":
