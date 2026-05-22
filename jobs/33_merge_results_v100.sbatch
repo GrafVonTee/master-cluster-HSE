@@ -2,8 +2,8 @@
 #SBATCH --job-name=merge-cl-v100
 #SBATCH --output=logs/slurm/merge-cl-v100-%j.out
 #SBATCH --error=logs/slurm/merge-cl-v100-%j.err
-#SBATCH --time=00:20:00
-#SBATCH --partition=test
+#SBATCH --time=00:30:00
+#SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
