@@ -188,6 +188,52 @@ def prepare_experiments(only: set[str] | None = None, include_base: bool = False
     return sorted(experiments, key=lambda x: (order.get(x[0], 99), x[0]))
 
 
+def _pick_benchmark_split(ds, benchmark: str):
+    if not hasattr(ds, "keys"):
+        return ds
+
+    name = str(benchmark).lower().strip()
+
+    if name == "mbpp":
+        preferred = ["test", "validation", "prompt", "train"]
+    elif name in {"humaneval", "human_eval", "openai_humaneval"}:
+        preferred = ["test", "train", "validation"]
+    else:
+        preferred = ["test", "validation", "train"]
+
+    for split in preferred:
+        if split in ds:
+            return ds[split]
+
+    keys = list(ds.keys())
+    if not keys:
+        raise ValueError(f"DatasetDict for {benchmark!r} has no splits")
+    return ds[keys[0]]
+
+
+def _pick_benchmark_split(ds, benchmark: str):
+    if not hasattr(ds, "keys"):
+        return ds
+
+    name = str(benchmark).lower().strip()
+
+    if name == "mbpp":
+        preferred = ["test", "validation", "prompt", "train"]
+    elif name in {"humaneval", "human_eval", "openai_humaneval"}:
+        preferred = ["test", "train", "validation"]
+    else:
+        preferred = ["test", "validation", "train"]
+
+    for split in preferred:
+        if split in ds:
+            return ds[split]
+
+    keys = list(ds.keys())
+    if not keys:
+        raise ValueError(f"DatasetDict for {benchmark!r} has no splits")
+    return ds[keys[0]]
+
+
 def load_raw_benchmark(benchmark: str):
     import datasets
     from pathlib import Path
@@ -198,14 +244,20 @@ def load_raw_benchmark(benchmark: str):
     if name == "mbpp":
         local_path = local_root / "mbpp"
         if local_path.exists():
-            return datasets.load_from_disk(str(local_path))
-        return datasets.load_dataset("google-research-datasets/mbpp")
+            return _pick_benchmark_split(datasets.load_from_disk(str(local_path)), name)
+        return _pick_benchmark_split(
+            datasets.load_dataset("google-research-datasets/mbpp", "sanitized"),
+            name,
+        )
 
     if name in {"humaneval", "human_eval", "openai_humaneval"}:
         local_path = local_root / "humaneval"
         if local_path.exists():
-            return datasets.load_from_disk(str(local_path))
-        return datasets.load_dataset("openai/openai_humaneval")
+            return _pick_benchmark_split(datasets.load_from_disk(str(local_path)), name)
+        return _pick_benchmark_split(
+            datasets.load_dataset("openai/openai_humaneval"),
+            name,
+        )
 
     raise ValueError(f"Unknown benchmark: {benchmark!r}")
 
@@ -325,6 +377,13 @@ def main() -> int:
                     raw = load_raw_benchmark(benchmark)
                     tasks = build_tasks(benchmark, raw, tokenizer, args.limit)
                     logger.info("Tasks: %s", len(tasks))
+
+                    if not tasks:
+                        raise RuntimeError(
+                            f"No tasks were built for benchmark={benchmark!r}. "
+                            f"Raw dataset columns={getattr(raw, 'column_names', None)}. "
+                            f"Check src/data/prompt/{benchmark}.py mapper."
+                        )
 
                     result = evaluator.run(tasks)
                     row = {

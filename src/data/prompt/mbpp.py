@@ -38,7 +38,7 @@ def _apply_chat_template(tokenizer, messages, train: bool) -> str:
 
 
 def build_prompt(example: dict, tokenizer, train=False) -> dict:
-    task_text = example["prompt"]
+    task_text = example.get("prompt") or example.get("text")
     code_solution = example["code"]
     signature_line = extract_signature_from_mbpp_code(example["code"])
 
