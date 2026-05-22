@@ -497,6 +497,98 @@ def effective_stage_max_steps(tcfg: dict[str, Any], schedule_type: str) -> int:
     return int(tcfg.get("stage_max_steps", tcfg.get("max_steps", 200)))
 
 
+
+def cast_trainable_params_to_fp32(model, logger: logging.Logger | None = None) -> None:
+    """Keep optimizer-facing trainable adapter params in fp32.
+
+    This is required for fp16 AMP/GradScaler on V100. The base model may stay
+    quantized/fp16, but trainable LoRA adapter weights should not be fp16 when
+    Trainer/Accelerate runs with fp16=True.
+    """
+    dtype_counts: dict[str, int] = {}
+    trainable = 0
+    cast = 0
+    cleared = 0
+
+    for _, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+
+        n = int(param.numel())
+        trainable += n
+        dtype_counts[str(param.dtype)] = dtype_counts.get(str(param.dtype), 0) + n
+
+        if param.grad is not None:
+            param.grad = None
+            cleared += 1
+
+        if param.dtype != torch.float32:
+            param.data = param.data.float()
+            cast += n
+
+    if logger is not None:
+        logger.info(
+            "Trainable dtype check: trainable=%s cast_to_fp32=%s cleared_grads=%s before=%s",
+            f"{trainable:,}",
+            f"{cast:,}",
+            cleared,
+            dtype_counts,
+        )
+
+    cleanup_cuda()
+
+
+def load_stage_model_and_tokenizer(
+    *,
+    previous_adapter_path: Path | None,
+    mcfg: dict[str, Any],
+    lcfg: dict[str, Any],
+    logger: logging.Logger,
+):
+    """Load a fresh model process-state for one curriculum stage.
+
+    Stage 1 loads the base model and attaches a new LoRA adapter.
+    Later stages load the adapter saved by the previous stage. This resets
+    Trainer/Accelerate/GradScaler state between stages and preserves each
+    intermediate stage on disk.
+    """
+    if previous_adapter_path is None:
+        logger.info("Loading base model for first stage: %s", config.MODEL_PATH)
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=config.MODEL_PATH,
+            max_seq_length=config.MAX_TOKENS,
+            dtype=mcfg.get("dtype"),
+            load_in_4bit=bool(mcfg.get("load_in_4bit", True)),
+        )
+
+        model = FastLanguageModel.get_peft_model(
+            model,
+            r=int(lcfg.get("r", 32)),
+            target_modules=list(lcfg["target_modules"]),
+            lora_alpha=int(lcfg.get("alpha", 32)),
+            lora_dropout=float(lcfg.get("dropout", 0)),
+            bias=str(lcfg.get("bias", "none")),
+            use_gradient_checkpointing=lcfg.get("use_gradient_checkpointing", "unsloth"),
+        )
+    else:
+        logger.info("Loading previous stage adapter for continued training: %s", previous_adapter_path)
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=str(previous_adapter_path),
+            max_seq_length=config.MAX_TOKENS,
+            dtype=mcfg.get("dtype"),
+            load_in_4bit=bool(mcfg.get("load_in_4bit", True)),
+        )
+
+    cast_trainable_params_to_fp32(model, logger)
+    return model, tokenizer
+
+
+def copy_final_adapter(src: Path, dst: Path) -> None:
+    if dst.exists():
+        shutil.rmtree(dst)
+    shutil.copytree(src, dst)
+
+
 def train_one_run(
     run_cfg: dict[str, Any],
     full_train_dataset: Dataset,
@@ -505,16 +597,6 @@ def train_one_run(
     force: bool,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    """Train one configured run.
-
-    Important for V100/fp16: curriculum stages are trained as stage-level
-    restarts. After every stage we save an intermediate LoRA adapter to disk,
-    delete Trainer/model state, then load the next stage from that adapter.
-
-    This avoids reusing several SFTTrainer/Accelerate/GradScaler instances on
-    the same already-trained PEFT model object, which can fail on V100 with:
-      ValueError: Attempting to unscale FP16 gradients.
-    """
     run_name = run_cfg["name"]
     category_col = run_cfg.get("category_col")
     schedule_type = str(run_cfg.get("schedule_type") or ("plain" if not category_col else "staged"))
@@ -539,6 +621,9 @@ def train_one_run(
             "category_col": category_col,
             "schedule_type": schedule_type,
             "adapter_path": str(save_path),
+            "metrics_jsonl": str(metrics_jsonl),
+            "tensorboard_dir": str(tb_run),
+            "stage_adapter_root": str(stage_adapter_root),
             "status": "skipped_exists",
         }
 
@@ -576,86 +661,16 @@ def train_one_run(
             "category_col": category_col,
             "schedule_type": schedule_type,
             "adapter_path": str(save_path),
+            "metrics_jsonl": str(metrics_jsonl),
+            "tensorboard_dir": str(tb_run),
+            "stage_adapter_root": str(stage_adapter_root),
             "status": "dry_run",
         }
 
-    def _safe_stage_name(name: Any) -> str:
-        return str(name).replace("+", "plus").replace("/", "_").replace(" ", "_")
-
-    def _ensure_trainable_lora_params(model, logger: logging.Logger) -> None:
-        """Make sure loaded LoRA adapters are trainable after stage restart.
-
-        Unsloth can load a saved adapter from disk. Depending on PEFT/Unsloth
-        version, trainable flags may be conservative after loading. We only
-        enable LoRA/module-save params, keeping the quantized base frozen.
-        """
-        trainable = 0
-        lora_params = 0
-        cast_fp32 = 0
-        for name, param in model.named_parameters():
-            is_lora = (
-                "lora_" in name
-                or ".lora_A" in name
-                or ".lora_B" in name
-                or "modules_to_save" in name
-            )
-            if is_lora:
-                param.requires_grad_(True)
-                lora_params += param.numel()
-                # Keep trainable adapter params optimizer-facing in fp32.
-                # Forward/backward still use mixed precision where appropriate.
-                if param.dtype in (torch.float16, torch.bfloat16):
-                    param.data = param.data.float()
-                    cast_fp32 += param.numel()
-            elif param.requires_grad:
-                # Do not accidentally unfreeze the base model.
-                param.requires_grad_(False)
-
-        for param in model.parameters():
-            if param.requires_grad:
-                trainable += param.numel()
-                param.grad = None
-
-        logger.info(
-            "Trainable adapter params after stage load: trainable=%s lora_like=%s cast_fp32=%s",
-            f"{trainable:,}",
-            f"{lora_params:,}",
-            f"{cast_fp32:,}",
-        )
-
-    def _load_model_for_stage(stage_idx: int, adapter_to_resume: Path | None):
-        model_name = str(adapter_to_resume) if adapter_to_resume is not None else config.MODEL_PATH
-        logger.info(
-            "Loading model for stage %s from %s",
-            stage_idx,
-            model_name,
-        )
-
-        model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name=model_name,
-            max_seq_length=config.MAX_TOKENS,
-            dtype=mcfg.get("dtype"),
-            load_in_4bit=bool(mcfg.get("load_in_4bit", True)),
-        )
-
-        if adapter_to_resume is None:
-            model = FastLanguageModel.get_peft_model(
-                model,
-                r=int(lcfg.get("r", 32)),
-                target_modules=list(lcfg["target_modules"]),
-                lora_alpha=int(lcfg.get("alpha", 32)),
-                lora_dropout=float(lcfg.get("dropout", 0)),
-                bias=str(lcfg.get("bias", "none")),
-                use_gradient_checkpointing=lcfg.get("use_gradient_checkpointing", "unsloth"),
-            )
-
-        try:
-            FastLanguageModel.for_training(model)
-        except Exception:
-            model.train()
-
-        _ensure_trainable_lora_params(model, logger)
-        return model, tokenizer
+    final_train_result = None
+    previous_adapter_path: Path | None = None
+    last_stage_adapter_path: Path | None = None
+    stage_summary: list[dict[str, Any]] = []
 
     with tee_to_file(LOG_ROOT / f"{run_name}.stdout.log"):
         logger.info("Starting run=%s category_col=%s schedule_type=%s", run_name, category_col, schedule_type)
@@ -669,25 +684,21 @@ def train_one_run(
         set_seed(seed)
         random.seed(seed)
 
-        final_train_result = None
-        stage_summary: list[dict[str, Any]] = []
-        adapter_to_resume: Path | None = None
-
         for stage_idx, stage_spec in enumerate(stage_specs, start=1):
             stage_raw = get_stage_raw_dataset(full_train_dataset, run_cfg, cfg, stage_spec, seed=seed + stage_idx)
             if len(stage_raw) == 0:
                 logger.warning("Stage %s skipped: empty dataset", stage_spec["name"])
                 continue
 
-            safe_stage = _safe_stage_name(stage_spec["name"])
-            stage_name = f"{run_name}_stage_{stage_idx}_{safe_stage}"
+            safe_stage_name = str(stage_spec["name"]).replace("+", "plus").replace("/", "_")
+            stage_name = f"{run_name}_stage_{stage_idx}_{safe_stage_name}"
             stage_dir = run_out / stage_name
             stage_tb = tb_run / stage_name
-            stage_adapter_path = stage_adapter_root / f"{stage_idx:02d}_{safe_stage}"
+            stage_adapter_path = stage_adapter_root / f"{stage_idx:02d}_{safe_stage_name}"
             max_steps = effective_stage_max_steps(tcfg, stage_spec["schedule_type"])
 
             logger.info(
-                "Stage %s/%s: %s | schedule=%s | categories=%s | weights=%s | raw_rows=%s | max_steps=%s | resume_adapter=%s",
+                "Stage %s/%s: %s | schedule=%s | categories=%s | weights=%s | rows=%s | max_steps=%s",
                 stage_idx,
                 len(stage_specs),
                 stage_spec["name"],
@@ -696,7 +707,6 @@ def train_one_run(
                 stage_spec.get("weights"),
                 len(stage_raw),
                 max_steps,
-                adapter_to_resume,
             )
 
             model = None
@@ -704,18 +714,22 @@ def train_one_run(
             trainer = None
             train_tokenized = None
             val_tokenized = None
-
             try:
-                model, tokenizer = _load_model_for_stage(stage_idx, adapter_to_resume)
+                model, tokenizer = load_stage_model_and_tokenizer(
+                    previous_adapter_path=previous_adapter_path,
+                    mcfg=mcfg,
+                    lcfg=lcfg,
+                    logger=logger,
+                )
+
                 val_tokenized = prepare_tokenized_dataset(full_val_dataset, tokenizer, train=True, seed=seed)
                 train_tokenized = prepare_tokenized_dataset(stage_raw, tokenizer, train=True, seed=seed + stage_idx)
 
                 logger.info(
-                    "Stage %s/%s tokenized: rows=%s | val_rows=%s",
-                    stage_idx,
-                    len(stage_specs),
+                    "Prepared tokenized stage: train_rows=%s val_rows=%s adapter_out=%s",
                     len(train_tokenized),
                     len(val_tokenized),
+                    stage_adapter_path,
                 )
 
                 args = make_training_arguments(
@@ -769,15 +783,13 @@ def train_one_run(
                 eval_path.write_text(json.dumps(eval_payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
                 logger.info("Saving stage LoRA adapter: %s", stage_adapter_path)
-                shutil.rmtree(stage_adapter_path, ignore_errors=True)
+                if stage_adapter_path.exists():
+                    shutil.rmtree(stage_adapter_path)
                 model.save_pretrained(str(stage_adapter_path))
                 tokenizer.save_pretrained(str(stage_adapter_path))
 
-                if stage_idx == len(stage_specs):
-                    logger.info("Saving final LoRA adapter: %s", save_path)
-                    shutil.rmtree(save_path, ignore_errors=True)
-                    model.save_pretrained(str(save_path))
-                    tokenizer.save_pretrained(str(save_path))
+                previous_adapter_path = stage_adapter_path
+                last_stage_adapter_path = stage_adapter_path
 
                 stage_summary.append({
                     "run_name": run_name,
@@ -791,17 +803,20 @@ def train_one_run(
                     "stage_adapter_path": str(stage_adapter_path),
                     **eval_payload,
                 })
-
-                adapter_to_resume = stage_adapter_path
-
             finally:
-                if trainer is not None:
-                    try:
+                try:
+                    if trainer is not None and hasattr(trainer, "accelerator"):
                         trainer.accelerator.free_memory()
-                    except Exception:
-                        pass
+                except Exception:
+                    pass
                 del trainer, model, tokenizer, train_tokenized, val_tokenized, stage_raw
                 cleanup_cuda()
+
+        if last_stage_adapter_path is None:
+            logger.warning("No non-empty stages completed; final adapter will not be saved")
+        else:
+            logger.info("Copying final stage adapter to final output: %s -> %s", last_stage_adapter_path, save_path)
+            copy_final_adapter(last_stage_adapter_path, save_path)
 
         if stage_summary:
             pd.DataFrame(stage_summary).to_csv(run_out / "stage_summary.csv", index=False)
@@ -810,7 +825,7 @@ def train_one_run(
                 json.dumps(stage_summary, indent=2, ensure_ascii=False), encoding="utf-8"
             )
 
-    status = "ok" if final_train_result is not None and save_path.exists() else "no_non_empty_stages"
+    status = "ok" if last_stage_adapter_path is not None and save_path.exists() else "no_non_empty_stages"
     return {
         "run_name": run_name,
         "category_col": category_col,

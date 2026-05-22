@@ -57,6 +57,33 @@ def merge_curriculum_scores(cfg: dict) -> dict:
 
     ds = load_source_dataset(cfg)
     base_df = pd.DataFrame(ds)
+
+    old_score_cols = [
+        "length_score",
+        "ppl_score",
+        "ppl_loss",
+        "ifd_score",
+        "cond_loss",
+        "uncond_loss",
+        "lexical_cluster_score",
+        "semantic_cluster_score",
+        "llm_judge_score",
+        "llm_judge_raw",
+    ]
+
+    old_category_cols = [
+        col for col in base_df.columns
+        if col.endswith("_category")
+    ]
+
+    drop_cols = [
+        col for col in old_score_cols + old_category_cols
+        if col in base_df.columns
+    ]
+
+    if drop_cols:
+        base_df = base_df.drop(columns=drop_cols)
+
     base_df["__idx"] = np.arange(len(base_df), dtype=int)
 
     length_path = root / "length.parquet"
@@ -96,6 +123,7 @@ def merge_curriculum_scores(cfg: dict) -> dict:
 
     score_columns = [
         "length_score",
+        "ppl_loss",
         "ppl_score",
         "ifd_score",
         "lexical_cluster_score",
@@ -111,8 +139,17 @@ def merge_curriculum_scores(cfg: dict) -> dict:
         if col not in df.columns:
             continue
 
+        # For PPL curriculum we sort by loss. PPL=exp(loss) has the same order,
+        # but loss is numerically safer and easier to debug.
+        if col == "ppl_score" and "ppl_loss" in df.columns:
+            continue
+
         categories, threshold = assign_categories(df[col].to_numpy(), percentiles)
-        base_name = col.replace("_score", "")
+
+        if col == "ppl_loss":
+            base_name = "ppl"
+        else:
+            base_name = col.replace("_score", "")
 
         df[f"{base_name}_category"] = categories
         thresholds[col] = threshold

@@ -5,14 +5,19 @@ dataset:
   chunk_size: 5000
 
 model:
-  name_or_path: Qwen/Qwen3-14b
-  local_path: null
+  name_or_path: Qwen/Qwen3-4b-instruct-2507
+  local_path: models/qwen3-4b-instruct-2507
   dtype: float16
   device: cuda
 
 loss:
   batch_size: 4
   max_length: 2048
+
+ppl:
+  batch_size: 4
+  max_length: 2048
+  skip_truncated: true
 
 lexical:
   n_clusters: 10

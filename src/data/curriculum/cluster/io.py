@@ -5,7 +5,7 @@ from pathlib import Path
 
 import torch
 import yaml
-from datasets import load_dataset
+from datasets import load_dataset, load_from_disk
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
@@ -51,8 +51,23 @@ def out_root(cfg: dict) -> Path:
     return path
 
 
+def resolve_project_path(value: str | None) -> str | None:
+    if value is None:
+        return None
+
+    path = Path(str(value))
+    if path.is_absolute():
+        return str(path)
+
+    return str(PROJECT_DIR / path)
+
+
 def model_path_from_cfg(cfg: dict) -> str:
-    return cfg["model"].get("local_path") or cfg["model"]["name_or_path"]
+    local_path = cfg["model"].get("local_path")
+    if local_path:
+        return resolve_project_path(local_path)
+
+    return cfg["model"]["name_or_path"]
 
 
 def dtype_from_cfg(cfg: dict):
@@ -69,15 +84,29 @@ def dtype_from_cfg(cfg: dict):
 
 
 def load_source_dataset(cfg: dict):
-    ds = load_dataset(
-        cfg["dataset"]["name"],
-        split=cfg["dataset"].get("split", "train"),
-        cache_dir=str(dataset_cache_dir()),
-    )
+    local_path = cfg.get("dataset", {}).get("local_path")
+
+    if local_path:
+        ds = load_from_disk(resolve_project_path(local_path))
+        split = cfg["dataset"].get("split")
+
+        if hasattr(ds, "keys"):
+            if split and split in ds:
+                ds = ds[split]
+            elif "train" in ds:
+                ds = ds["train"]
+            else:
+                ds = ds[list(ds.keys())[0]]
+    else:
+        ds = load_dataset(
+            cfg["dataset"]["name"],
+            split=cfg["dataset"].get("split", "train"),
+            cache_dir=str(dataset_cache_dir()),
+        )
 
     limit = cfg["dataset"].get("limit")
     if limit is not None:
-        ds = ds.select(range(min(int(limit), len(ds))))
+        ds = ds.select(range(min(int(limit), len(ds))), keep_in_memory=True)
 
     return ds
 
