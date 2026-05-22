@@ -54,7 +54,7 @@ echo "image=$IMAGE"
 echo "config=$CONFIG"
 nvidia-smi || true
 
-test -f "$IMAGE" || { echo "Missing image: $IMAGE"; exit 1; }
+test -e "$IMAGE" || { echo "Missing image: $IMAGE"; exit 1; }
 test -d models/qwen3-4b || { echo "Missing model dir: models/qwen3-4b"; exit 1; }
 test -d datasets/pythoncodes_cl_scored || { echo "Missing dataset: datasets/pythoncodes_cl_scored"; exit 1; }
 

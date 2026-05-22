@@ -34,7 +34,7 @@ echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-none}"
 echo "image=$IMAGE"
 nvidia-smi || true
 
-test -f "$IMAGE" || { echo "Missing image: $IMAGE"; exit 1; }
+test -e "$IMAGE" || { echo "Missing image: $IMAGE"; exit 1; }
 
 srun singularity exec --nv --cleanenv \
   --bind "$PROJECT_DIR:/workspace" \
