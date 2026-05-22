@@ -18,10 +18,9 @@ curriculum:
       weights: {easy: 0.20, medium: 0.20, hard: 0.60}
 
 model:
-  base_model: /workspace/models/qwen3-4b
-  output_model_prefix: /workspace/models/qwen3-4b-sft
-  load_in_4bit: true
-  dtype: null
+  base_model: /workspace/models/qwen3-8b
+  output_model_prefix: /workspace/models/qwen3-8b-sft
+  load_in_4bit: false
 
 lora:
   r: 32
@@ -39,8 +38,8 @@ lora:
     - down_proj
 
 training:
-  train_batch_size: 4
-  gradient_steps: 16
+  train_batch_size: 8
+  gradient_steps: 8
   max_steps: 600
   stage_max_steps: 200
   warmup_steps: 25

@@ -44,8 +44,8 @@ MODELS = {
         "path": str(MODELS_DIR / "qwen3-4b-thinking-2507"),
     },
     "7b": {
-        "name": "Qwen/Qwen3-7B",
-        "path": str(MODELS_DIR / "qwen3-7b"),
+        "name": "Qwen/Qwen3-8B",
+        "path": str(MODELS_DIR / "qwen3-8b"),
     },
     "14b": {
         "name": "Qwen/Qwen3-14B",
