@@ -20,7 +20,7 @@ trap 'rm -rf "$SINGULARITY_TMPDIR"' EXIT
 
 
 PROJECT_DIR="${PROJECT_DIR:-$HOME/master-cluster-HSE}"
-IMAGE="$PROJECT_DIR/containers/sif/unsloth-v100.sif"
+IMAGE="$PROJECT_DIR/containers/sandboxes/unsloth-v100"
 cd "$PROJECT_DIR"
 
 module purge

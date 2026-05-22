@@ -20,7 +20,7 @@ trap 'rm -rf "$SINGULARITY_TMPDIR"' EXIT
 
 
 PROJECT_DIR="${PROJECT_DIR:-$HOME/master-cluster-HSE}"
-IMAGE="$PROJECT_DIR/containers/sif/unsloth-v100.sif"
+IMAGE="$PROJECT_DIR/containers/sandboxes/unsloth-v100"
 CONFIG="${CONFIG:-configs/train/lora_pythoncodes_cl.yaml}"
 RUN_NAME="${RUN_NAME:-sft_pythoncodes}"
 cd "$PROJECT_DIR"
