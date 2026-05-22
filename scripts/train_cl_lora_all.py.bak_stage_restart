@@ -505,16 +505,6 @@ def train_one_run(
     force: bool,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    """Train one configured run.
-
-    Important for V100/fp16: curriculum stages are trained as stage-level
-    restarts. After every stage we save an intermediate LoRA adapter to disk,
-    delete Trainer/model state, then load the next stage from that adapter.
-
-    This avoids reusing several SFTTrainer/Accelerate/GradScaler instances on
-    the same already-trained PEFT model object, which can fail on V100 with:
-      ValueError: Attempting to unscale FP16 gradients.
-    """
     run_name = run_cfg["name"]
     category_col = run_cfg.get("category_col")
     schedule_type = str(run_cfg.get("schedule_type") or ("plain" if not category_col else "staged"))
@@ -525,7 +515,6 @@ def train_one_run(
     run_out = RUN_ROOT / run_name
     tb_run = TB_ROOT / run_name
     metrics_jsonl = run_out / "metrics.jsonl"
-    stage_adapter_root = run_out / "stage_adapters"
 
     if force and not dry_run:
         shutil.rmtree(save_path, ignore_errors=True)
@@ -544,7 +533,6 @@ def train_one_run(
 
     run_out.mkdir(parents=True, exist_ok=True)
     tb_run.mkdir(parents=True, exist_ok=True)
-    stage_adapter_root.mkdir(parents=True, exist_ok=True)
 
     tcfg = cfg["training"]
     lcfg = cfg["lora"]
@@ -579,89 +567,10 @@ def train_one_run(
             "status": "dry_run",
         }
 
-    def _safe_stage_name(name: Any) -> str:
-        return str(name).replace("+", "plus").replace("/", "_").replace(" ", "_")
-
-    def _ensure_trainable_lora_params(model, logger: logging.Logger) -> None:
-        """Make sure loaded LoRA adapters are trainable after stage restart.
-
-        Unsloth can load a saved adapter from disk. Depending on PEFT/Unsloth
-        version, trainable flags may be conservative after loading. We only
-        enable LoRA/module-save params, keeping the quantized base frozen.
-        """
-        trainable = 0
-        lora_params = 0
-        cast_fp32 = 0
-        for name, param in model.named_parameters():
-            is_lora = (
-                "lora_" in name
-                or ".lora_A" in name
-                or ".lora_B" in name
-                or "modules_to_save" in name
-            )
-            if is_lora:
-                param.requires_grad_(True)
-                lora_params += param.numel()
-                # Keep trainable adapter params optimizer-facing in fp32.
-                # Forward/backward still use mixed precision where appropriate.
-                if param.dtype in (torch.float16, torch.bfloat16):
-                    param.data = param.data.float()
-                    cast_fp32 += param.numel()
-            elif param.requires_grad:
-                # Do not accidentally unfreeze the base model.
-                param.requires_grad_(False)
-
-        for param in model.parameters():
-            if param.requires_grad:
-                trainable += param.numel()
-                param.grad = None
-
-        logger.info(
-            "Trainable adapter params after stage load: trainable=%s lora_like=%s cast_fp32=%s",
-            f"{trainable:,}",
-            f"{lora_params:,}",
-            f"{cast_fp32:,}",
-        )
-
-    def _load_model_for_stage(stage_idx: int, adapter_to_resume: Path | None):
-        model_name = str(adapter_to_resume) if adapter_to_resume is not None else config.MODEL_PATH
-        logger.info(
-            "Loading model for stage %s from %s",
-            stage_idx,
-            model_name,
-        )
-
-        model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name=model_name,
-            max_seq_length=config.MAX_TOKENS,
-            dtype=mcfg.get("dtype"),
-            load_in_4bit=bool(mcfg.get("load_in_4bit", True)),
-        )
-
-        if adapter_to_resume is None:
-            model = FastLanguageModel.get_peft_model(
-                model,
-                r=int(lcfg.get("r", 32)),
-                target_modules=list(lcfg["target_modules"]),
-                lora_alpha=int(lcfg.get("alpha", 32)),
-                lora_dropout=float(lcfg.get("dropout", 0)),
-                bias=str(lcfg.get("bias", "none")),
-                use_gradient_checkpointing=lcfg.get("use_gradient_checkpointing", "unsloth"),
-            )
-
-        try:
-            FastLanguageModel.for_training(model)
-        except Exception:
-            model.train()
-
-        _ensure_trainable_lora_params(model, logger)
-        return model, tokenizer
-
     with tee_to_file(LOG_ROOT / f"{run_name}.stdout.log"):
         logger.info("Starting run=%s category_col=%s schedule_type=%s", run_name, category_col, schedule_type)
         logger.info("Base model: %s", config.MODEL_PATH)
         logger.info("Output adapter: %s", save_path)
-        logger.info("Stage adapter root: %s", stage_adapter_root)
         logger.info("TRAIN_MAX_STEPS_OVERRIDE=%s", os.environ.get("TRAIN_MAX_STEPS_OVERRIDE", ""))
         logger.info("TRAIN_DATASET_LIMIT_OVERRIDE=%s", os.environ.get("TRAIN_DATASET_LIMIT_OVERRIDE", ""))
         logger.info("TRAIN_VAL_SIZE_OVERRIDE=%s", os.environ.get("TRAIN_VAL_SIZE_OVERRIDE", ""))
@@ -669,139 +578,121 @@ def train_one_run(
         set_seed(seed)
         random.seed(seed)
 
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=config.MODEL_PATH,
+            max_seq_length=config.MAX_TOKENS,
+            dtype=mcfg.get("dtype"),
+            load_in_4bit=bool(mcfg.get("load_in_4bit", True)),
+        )
+
+        model = FastLanguageModel.get_peft_model(
+            model,
+            r=int(lcfg.get("r", 32)),
+            target_modules=list(lcfg["target_modules"]),
+            lora_alpha=int(lcfg.get("alpha", 32)),
+            lora_dropout=float(lcfg.get("dropout", 0)),
+            bias=str(lcfg.get("bias", "none")),
+            use_gradient_checkpointing=lcfg.get("use_gradient_checkpointing", "unsloth"),
+        )
+
+        val_tokenized = prepare_tokenized_dataset(full_val_dataset, tokenizer, train=True, seed=seed)
+
         final_train_result = None
         stage_summary: list[dict[str, Any]] = []
-        adapter_to_resume: Path | None = None
-
         for stage_idx, stage_spec in enumerate(stage_specs, start=1):
             stage_raw = get_stage_raw_dataset(full_train_dataset, run_cfg, cfg, stage_spec, seed=seed + stage_idx)
             if len(stage_raw) == 0:
                 logger.warning("Stage %s skipped: empty dataset", stage_spec["name"])
                 continue
 
-            safe_stage = _safe_stage_name(stage_spec["name"])
-            stage_name = f"{run_name}_stage_{stage_idx}_{safe_stage}"
+            train_tokenized = prepare_tokenized_dataset(stage_raw, tokenizer, train=True, seed=seed + stage_idx)
+            safe_stage_name = str(stage_spec["name"]).replace("+", "plus").replace("/", "_")
+            stage_name = f"{run_name}_stage_{stage_idx}_{safe_stage_name}"
             stage_dir = run_out / stage_name
             stage_tb = tb_run / stage_name
-            stage_adapter_path = stage_adapter_root / f"{stage_idx:02d}_{safe_stage}"
             max_steps = effective_stage_max_steps(tcfg, stage_spec["schedule_type"])
 
             logger.info(
-                "Stage %s/%s: %s | schedule=%s | categories=%s | weights=%s | raw_rows=%s | max_steps=%s | resume_adapter=%s",
+                "Stage %s/%s: %s | schedule=%s | categories=%s | weights=%s | rows=%s | val_rows=%s | max_steps=%s",
                 stage_idx,
                 len(stage_specs),
                 stage_spec["name"],
                 stage_spec["schedule_type"],
                 stage_spec.get("categories"),
                 stage_spec.get("weights"),
-                len(stage_raw),
+                len(train_tokenized),
+                len(val_tokenized),
                 max_steps,
-                adapter_to_resume,
             )
 
-            model = None
-            tokenizer = None
-            trainer = None
-            train_tokenized = None
-            val_tokenized = None
+            args = make_training_arguments(
+                output_dir=str(stage_dir / "checkpoints"),
+                run_name=stage_name,
+                per_device_train_batch_size=int(tcfg.get("train_batch_size", 1)),
+                gradient_accumulation_steps=int(tcfg.get("gradient_steps", 8)),
+                max_steps=int(max_steps),
+                warmup_steps=min(int(tcfg.get("warmup_steps", 25)), max(0, int(max_steps) - 1)),
+                learning_rate=float(tcfg.get("lr", 2e-4)),
+                lr_scheduler_type=str(tcfg.get("lr_scheduler_type", "cosine")),
+                optim=str(tcfg.get("optim", "paged_adamw_8bit")),
+                fp16=not torch.cuda.is_bf16_supported(),
+                bf16=torch.cuda.is_bf16_supported(),
+                logging_strategy="steps",
+                logging_steps=max(1, min(int(tcfg.get("logging_steps", 10)), int(max_steps))),
+                eval_strategy="steps",
+                eval_steps=max(1, min(int(tcfg.get("eval_steps", 50)), int(max_steps))),
+                save_strategy="steps",
+                save_steps=max(1, min(int(tcfg.get("save_steps", 100)), int(max_steps))),
+                save_total_limit=int(tcfg.get("save_total_limit", 2)),
+                report_to=[str(tcfg.get("report_to", "tensorboard"))],
+                logging_dir=str(stage_tb),
+                dataloader_num_workers=int(tcfg.get("dataloader_num_workers", 2)),
+                dataloader_pin_memory=bool(tcfg.get("dataloader_pin_memory", True)),
+                max_grad_norm=float(tcfg.get("max_grad_norm", 1.0)),
+                seed=seed,
+                remove_unused_columns=False,
+                max_seq_length=config.MAX_TOKENS,
+                max_length=config.MAX_TOKENS,
+                packing=False,
+                assistant_only_loss=False,  # labels already contain assistant-only mask
+                dataset_kwargs={"skip_prepare_dataset": True},
+            )
 
-            try:
-                model, tokenizer = _load_model_for_stage(stage_idx, adapter_to_resume)
-                val_tokenized = prepare_tokenized_dataset(full_val_dataset, tokenizer, train=True, seed=seed)
-                train_tokenized = prepare_tokenized_dataset(stage_raw, tokenizer, train=True, seed=seed + stage_idx)
+            trainer = make_sft_trainer(
+                model=model,
+                tokenizer=tokenizer,
+                train_dataset=train_tokenized,
+                eval_dataset=val_tokenized,
+                args=args,
+                callbacks=[JsonlMetricCallback(metrics_jsonl, logger, tb_dir=stage_tb)],
+            )
 
-                logger.info(
-                    "Stage %s/%s tokenized: rows=%s | val_rows=%s",
-                    stage_idx,
-                    len(stage_specs),
-                    len(train_tokenized),
-                    len(val_tokenized),
-                )
+            final_train_result = trainer.train()
+            eval_metrics = trainer.evaluate()
+            logger.info("Stage %s final eval: %s", stage_spec["name"], eval_metrics)
 
-                args = make_training_arguments(
-                    output_dir=str(stage_dir / "checkpoints"),
-                    run_name=stage_name,
-                    per_device_train_batch_size=int(tcfg.get("train_batch_size", 1)),
-                    gradient_accumulation_steps=int(tcfg.get("gradient_steps", 8)),
-                    max_steps=int(max_steps),
-                    warmup_steps=min(int(tcfg.get("warmup_steps", 25)), max(0, int(max_steps) - 1)),
-                    learning_rate=float(tcfg.get("lr", 2e-4)),
-                    lr_scheduler_type=str(tcfg.get("lr_scheduler_type", "cosine")),
-                    optim=str(tcfg.get("optim", "paged_adamw_8bit")),
-                    fp16=not torch.cuda.is_bf16_supported(),
-                    bf16=torch.cuda.is_bf16_supported(),
-                    logging_strategy="steps",
-                    logging_steps=max(1, min(int(tcfg.get("logging_steps", 10)), int(max_steps))),
-                    eval_strategy="steps",
-                    eval_steps=max(1, min(int(tcfg.get("eval_steps", 50)), int(max_steps))),
-                    save_strategy="steps",
-                    save_steps=max(1, min(int(tcfg.get("save_steps", 100)), int(max_steps))),
-                    save_total_limit=int(tcfg.get("save_total_limit", 2)),
-                    report_to=[str(tcfg.get("report_to", "tensorboard"))],
-                    logging_dir=str(stage_tb),
-                    dataloader_num_workers=int(tcfg.get("dataloader_num_workers", 2)),
-                    dataloader_pin_memory=bool(tcfg.get("dataloader_pin_memory", True)),
-                    max_grad_norm=float(tcfg.get("max_grad_norm", 1.0)),
-                    seed=seed,
-                    remove_unused_columns=False,
-                    max_seq_length=config.MAX_TOKENS,
-                    max_length=config.MAX_TOKENS,
-                    packing=False,
-                    assistant_only_loss=False,  # labels already contain assistant-only mask
-                    dataset_kwargs={"skip_prepare_dataset": True},
-                )
+            eval_path = run_out / f"{stage_name}_final_eval.json"
+            eval_payload = {k: _json_safe(v) for k, v in eval_metrics.items()}
+            eval_path.write_text(json.dumps(eval_payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
-                trainer = make_sft_trainer(
-                    model=model,
-                    tokenizer=tokenizer,
-                    train_dataset=train_tokenized,
-                    eval_dataset=val_tokenized,
-                    args=args,
-                    callbacks=[JsonlMetricCallback(metrics_jsonl, logger, tb_dir=stage_tb)],
-                )
+            stage_summary.append({
+                "run_name": run_name,
+                "stage_idx": stage_idx,
+                "stage_name": stage_spec["name"],
+                "schedule_type": stage_spec["schedule_type"],
+                "categories": ",".join(stage_spec.get("categories", [])),
+                "weights": json.dumps(stage_spec.get("weights", {}), ensure_ascii=False),
+                "rows": len(train_tokenized),
+                "max_steps": max_steps,
+                **eval_payload,
+            })
 
-                final_train_result = trainer.train()
-                eval_metrics = trainer.evaluate()
-                logger.info("Stage %s final eval: %s", stage_spec["name"], eval_metrics)
+            del trainer, train_tokenized, stage_raw
+            cleanup_cuda()
 
-                eval_path = run_out / f"{stage_name}_final_eval.json"
-                eval_payload = {k: _json_safe(v) for k, v in eval_metrics.items()}
-                eval_path.write_text(json.dumps(eval_payload, indent=2, ensure_ascii=False), encoding="utf-8")
-
-                logger.info("Saving stage LoRA adapter: %s", stage_adapter_path)
-                shutil.rmtree(stage_adapter_path, ignore_errors=True)
-                model.save_pretrained(str(stage_adapter_path))
-                tokenizer.save_pretrained(str(stage_adapter_path))
-
-                if stage_idx == len(stage_specs):
-                    logger.info("Saving final LoRA adapter: %s", save_path)
-                    shutil.rmtree(save_path, ignore_errors=True)
-                    model.save_pretrained(str(save_path))
-                    tokenizer.save_pretrained(str(save_path))
-
-                stage_summary.append({
-                    "run_name": run_name,
-                    "stage_idx": stage_idx,
-                    "stage_name": stage_spec["name"],
-                    "schedule_type": stage_spec["schedule_type"],
-                    "categories": ",".join(stage_spec.get("categories", [])),
-                    "weights": json.dumps(stage_spec.get("weights", {}), ensure_ascii=False),
-                    "rows": len(train_tokenized),
-                    "max_steps": max_steps,
-                    "stage_adapter_path": str(stage_adapter_path),
-                    **eval_payload,
-                })
-
-                adapter_to_resume = stage_adapter_path
-
-            finally:
-                if trainer is not None:
-                    try:
-                        trainer.accelerator.free_memory()
-                    except Exception:
-                        pass
-                del trainer, model, tokenizer, train_tokenized, val_tokenized, stage_raw
-                cleanup_cuda()
+        logger.info("Saving LoRA adapter: %s", save_path)
+        model.save_pretrained(str(save_path))
+        tokenizer.save_pretrained(str(save_path))
 
         if stage_summary:
             pd.DataFrame(stage_summary).to_csv(run_out / "stage_summary.csv", index=False)
@@ -810,7 +701,10 @@ def train_one_run(
                 json.dumps(stage_summary, indent=2, ensure_ascii=False), encoding="utf-8"
             )
 
-    status = "ok" if final_train_result is not None and save_path.exists() else "no_non_empty_stages"
+        del model, tokenizer, val_tokenized
+        cleanup_cuda()
+
+    status = "ok" if final_train_result is not None else "no_non_empty_stages"
     return {
         "run_name": run_name,
         "category_col": category_col,
@@ -818,9 +712,9 @@ def train_one_run(
         "adapter_path": str(save_path),
         "metrics_jsonl": str(metrics_jsonl),
         "tensorboard_dir": str(tb_run),
-        "stage_adapter_root": str(stage_adapter_root),
         "status": status,
     }
+
 
 def print_run_table(cfg: dict[str, Any]) -> None:
     rows = []
