@@ -59,4 +59,4 @@ srun singularity exec --nv --cleanenv \
   --env EVAL_MAX_NEW_TOKENS=128 \
   --env PYTHONUNBUFFERED=1 \
   "$IMAGE" \
-  bash -lc 'cd /workspace && python -u scripts/eval_lora_all.py --benchmarks mbpp --limit 2 --include-base --only base'
+  bash -lc 'cd /workspace && python -u scripts/eval_lora_all.py --benchmarks mbpp,humaneval --limit 2 --include-base --only base'
