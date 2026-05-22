@@ -1,4 +1,5 @@
 import json
+import os
 import numpy as np
 from typing import List, Dict
 
@@ -70,11 +71,14 @@ class Evaluator:
 
                 # Important: make_sampling_params always sets max_tokens explicitly
                 # from EVAL_MAX_NEW_TOKENS. vLLM default is only 16.
+                enable_logprobs = os.environ.get("EVAL_ENABLE_LOGPROBS", "0").strip().lower()
+                enable_logprobs = enable_logprobs in {"1", "true", "yes", "on"}
+
                 vllm_params = make_sampling_params(
                     self.tokenizer,
                     n=n,
                     temperature=temp,
-                    logprobs=1,
+                    logprobs=1 if enable_logprobs else None,
                 )
 
                 groups[cfg_key] = {"params": vllm_params, "metrics": []}

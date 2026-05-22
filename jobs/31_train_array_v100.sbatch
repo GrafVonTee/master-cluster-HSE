@@ -2,7 +2,7 @@
 #SBATCH --job-name=train-cl-v100
 #SBATCH --output=logs/slurm/train-cl-v100-%A-%a.out
 #SBATCH --error=logs/slurm/train-cl-v100-%A-%a.err
-#SBATCH --time=03:00:00
+#SBATCH --time=06:00:00
 #SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -38,7 +38,7 @@ if [ ! -f "$MATRIX" ]; then
   --env HOME=/workspace/.home \
   --env HF_HOME=/workspace/.cache/huggingface \
   containers/sif/vllm-v100.sif \
-  bash -lc "cd /workspace && python -u scripts/cluster_make_run_matrices.py --config '$CONFIG'" 
+  bash -lc "cd /workspace && python -u scripts/cluster_make_run_matrices.py --config '$CONFIG'"
 fi
 
 RUN_NAME=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "$MATRIX")

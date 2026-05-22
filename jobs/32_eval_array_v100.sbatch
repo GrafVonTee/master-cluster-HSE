@@ -41,7 +41,7 @@ if [ ! -f "$MATRIX" ]; then
   --env HOME=/workspace/.home \
   --env HF_HOME=/workspace/.cache/huggingface \
   containers/sif/vllm-v100.sif \
-  bash -lc "cd /workspace && python -u scripts/cluster_make_run_matrices.py --config '$CONFIG'" 
+  bash -lc "cd /workspace && python -u scripts/cluster_make_run_matrices.py --config '$CONFIG'"
 fi
 
 EXP_NAME=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "$MATRIX")
