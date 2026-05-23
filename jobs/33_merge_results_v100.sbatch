@@ -10,25 +10,25 @@
 
 set -euo pipefail
 
-# Avoid small compute-node /tmp. Some Singularity installations extract SIF
-# into a temporary sandbox, which can easily exceed /tmp/job-* space.
-export SINGULARITY_CACHEDIR="$PWD/.singularity/cache"
-export SINGULARITY_TMPDIR="$PWD/.singularity/tmp/${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID:-0}"
-mkdir -p "$SINGULARITY_CACHEDIR" "$SINGULARITY_TMPDIR"
-trap 'rm -rf "$SINGULARITY_TMPDIR"' EXIT
-
-
 PROJECT_DIR="${PROJECT_DIR:-$HOME/master-cluster-HSE}"
-IMAGE="$PROJECT_DIR/containers/sandboxes/vllm-v100"
 cd "$PROJECT_DIR"
 
 module purge
 module load singularity/3.9.0
 
+IMAGE="$PROJECT_DIR/containers/sandboxes/vllm-v100"
+
+export SINGULARITY_CACHEDIR="$PROJECT_DIR/.singularity/cache"
+export SINGULARITY_TMPDIR="$PROJECT_DIR/.singularity/tmp/${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID:-0}"
+mkdir -p "$SINGULARITY_CACHEDIR" "$SINGULARITY_TMPDIR"
+trap 'rm -rf "$SINGULARITY_TMPDIR"' EXIT
+
 mkdir -p logs/slurm outputs/eval outputs/train_runs .home .cache/huggingface
 
 echo "===== MERGE JOB ====="
-echo "job=${SLURM_JOB_ID:-none} node=${SLURMD_NODENAME:-unknown} host=$(hostname)"
+echo "job=${SLURM_JOB_ID:-none}"
+echo "node=${SLURMD_NODENAME:-unknown}"
+echo "host=$(hostname)"
 echo "image=$IMAGE"
 
 test -e "$IMAGE" || { echo "Missing image: $IMAGE"; exit 1; }
