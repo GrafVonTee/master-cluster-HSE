@@ -13,14 +13,14 @@ x-unsloth-base: &unsloth-base
     PROJECT_DIR: /workspace
     PYTHONPATH: /workspace
     HF_HOME: /workspace/.cache/huggingface
-    HF_DATASETS_CACHE: /workspace/.cache/hf_datasets
+    HF_DATASETS_CACHE: /workspace/.cache/huggingface/datasets
     VLLM_CACHE_ROOT: /workspace/.cache/vllm
     TOKENIZERS_PARALLELISM: "false"
-    SELECTED_MODEL: 4b-instruct
     MAX_TOKENS: 2048
     GPU_MEMORY_UTILIZATION: 0.88
     TRAIN_MAX_STEPS_OVERRIDE: ${TRAIN_MAX_STEPS_OVERRIDE:-}
     EVAL_MAX_NEW_TOKENS: ${EVAL_MAX_NEW_TOKENS:-512}
+    EVAL_ENABLE_LOGPROBS: ${EVAL_ENABLE_LOGPROBS:-1}
     NVIDIA_VISIBLE_DEVICES: all
     NVIDIA_DRIVER_CAPABILITIES: compute,utility
 
@@ -67,7 +67,7 @@ services:
       PROJECT_DIR: /workspace
       PYTHONPATH: /workspace
       HF_HOME: /workspace/.cache/huggingface
-      HF_DATASETS_CACHE: /workspace/.cache/hf_datasets
+      HF_DATASETS_CACHE: /workspace/.cache/huggingface/datasets
       VLLM_CACHE_ROOT: /workspace/.cache/vllm
       TOKENIZERS_PARALLELISM: "false"
     entrypoint: ["/bin/bash", "-lc"]

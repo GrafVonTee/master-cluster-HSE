@@ -43,7 +43,7 @@ MODELS = {
         "name": "Qwen/Qwen3-4B-Thinking-2507",
         "path": str(MODELS_DIR / "qwen3-4b-thinking-2507"),
     },
-    "7b": {
+    "8b": {
         "name": "Qwen/Qwen3-8B",
         "path": str(MODELS_DIR / "qwen3-8b"),
     },
@@ -54,7 +54,7 @@ MODELS = {
 }
 
 
-SELECTED_MODEL = os.environ.get("SELECTED_MODEL", "4b")
+SELECTED_MODEL = os.environ.get("SELECTED_MODEL", "4b-instruct")
 
 if SELECTED_MODEL not in MODELS:
     raise ValueError(f"Unknown SELECTED_MODEL={SELECTED_MODEL}. Available: {list(MODELS)}")

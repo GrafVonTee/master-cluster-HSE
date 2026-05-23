@@ -19,7 +19,7 @@ trap 'rm -rf "$SINGULARITY_TMPDIR"' EXIT
 
 
 PROJECT_DIR="${PROJECT_DIR:-$HOME/master-cluster-HSE}"
-IMAGE="$PROJECT_DIR/containers/sif/vllm-v100.sif"
+IMAGE="$PROJECT_DIR/containers/sandboxes/vllm-v100"
 cd "$PROJECT_DIR"
 
 module purge
@@ -31,7 +31,7 @@ echo "===== MERGE JOB ====="
 echo "job=${SLURM_JOB_ID:-none} node=${SLURMD_NODENAME:-unknown} host=$(hostname)"
 echo "image=$IMAGE"
 
-test -f "$IMAGE" || { echo "Missing image: $IMAGE"; exit 1; }
+test -e "$IMAGE" || { echo "Missing image: $IMAGE"; exit 1; }
 
 singularity exec --cleanenv \
   --bind "$PROJECT_DIR:/workspace" \

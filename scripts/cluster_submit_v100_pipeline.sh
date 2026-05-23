@@ -11,7 +11,7 @@ singularity exec --cleanenv \
   --env PYTHONPATH=/workspace \
   --env HOME=/workspace/.home \
   --env HF_HOME=/workspace/.cache/huggingface \
-  containers/sif/vllm-v100.sif \
+  containers/sandboxes/vllm-v100 \
   bash -lc "cd /workspace && python -u scripts/cluster_make_run_matrices.py --config '$CONFIG'" 
 
 TRAIN_N=$(wc -l < outputs/cluster/train_runs.txt | tr -d ' ')

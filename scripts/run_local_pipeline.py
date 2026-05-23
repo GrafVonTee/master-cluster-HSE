@@ -45,7 +45,9 @@ def main() -> int:
     parser.add_argument("--no-tensorboard", action="store_true")
     parser.add_argument("--rebuild", action="store_true")
     parser.add_argument("--force", action="store_true")
-    parser.add_argument("--only", nargs="*", default=None)
+    parser.add_argument("--only", nargs="*", default=None, help="Apply same run filter to train and eval")
+    parser.add_argument("--train-only", nargs="*", default=None, help="Run names for training only")
+    parser.add_argument("--eval-only", nargs="*", default=None, help="Experiment names for eval only; may include base")
     parser.add_argument("--eval-benchmarks", default="mbpp,humaneval")
     parser.add_argument("--eval-limit", type=int, default=None)
     parser.add_argument("--eval-max-new-tokens", type=int, default=None)
@@ -56,6 +58,10 @@ def main() -> int:
     compose = dc()
     train_steps = pick(args.train_max_steps_override, "TRAIN_MAX_STEPS_OVERRIDE")
     eval_new_tokens = pick(args.eval_max_new_tokens, "EVAL_MAX_NEW_TOKENS", 512)
+    train_only = args.train_only if args.train_only is not None else args.only
+    eval_only = args.eval_only if args.eval_only is not None else args.only
+    selected_model = os.environ.get("SELECTED_MODEL", "4b-instruct")
+    eval_logprobs = os.environ.get("EVAL_ENABLE_LOGPROBS", "0")
 
     if args.rebuild:
         run(compose + ["build", "train", "eval", "tensorboard"])
@@ -68,9 +74,9 @@ def main() -> int:
         cmd = ["python", "scripts/train_cl_lora_all.py", "--config", args.config]
         if args.force:
             cmd.append("--force")
-        if args.only:
-            cmd += ["--only", *args.only]
-        run(compose + ["run", "--rm", *env_args({"TRAIN_MAX_STEPS_OVERRIDE": train_steps}), "train"] + cmd)
+        if train_only:
+            cmd += ["--only", *train_only]
+        run(compose + ["run", "--rm", *env_args({"TRAIN_MAX_STEPS_OVERRIDE": train_steps, "SELECTED_MODEL": selected_model}), "train"] + cmd)
 
     if not args.skip_eval:
         cmd = ["python", "scripts/eval_lora_all.py", "--benchmarks", args.eval_benchmarks]
@@ -78,9 +84,9 @@ def main() -> int:
             cmd.append("--include-base")
         if args.eval_limit is not None:
             cmd += ["--limit", str(args.eval_limit)]
-        if args.only:
-            cmd += ["--only", *args.only]
-        run(compose + ["run", "--rm", *env_args({"EVAL_MAX_NEW_TOKENS": eval_new_tokens}), "eval"] + cmd)
+        if eval_only:
+            cmd += ["--only", *eval_only]
+        run(compose + ["run", "--rm", *env_args({"EVAL_MAX_NEW_TOKENS": eval_new_tokens, "EVAL_ENABLE_LOGPROBS": eval_logprobs, "SELECTED_MODEL": selected_model}), "eval"] + cmd)
 
     return 0
 

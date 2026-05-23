@@ -20,7 +20,7 @@ trap 'rm -rf "$SINGULARITY_TMPDIR"' EXIT
 
 
 PROJECT_DIR="${PROJECT_DIR:-$HOME/master-cluster-HSE}"
-IMAGE="$PROJECT_DIR/containers/sif/vllm-v100.sif"
+IMAGE="$PROJECT_DIR/containers/sandboxes/vllm-v100"
 cd "$PROJECT_DIR"
 
 module purge
@@ -34,7 +34,7 @@ echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-none}"
 echo "image=$IMAGE"
 nvidia-smi || true
 
-test -f "$IMAGE" || { echo "Missing image: $IMAGE"; exit 1; }
+test -e "$IMAGE" || { echo "Missing image: $IMAGE"; exit 1; }
 test -d models/qwen3-4b || { echo "Missing model dir: models/qwen3-4b"; exit 1; }
 
 srun singularity exec --nv --cleanenv \

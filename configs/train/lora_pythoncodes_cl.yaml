@@ -18,8 +18,8 @@ curriculum:
       weights: {easy: 0.20, medium: 0.20, hard: 0.60}
 
 model:
-  base_model: /workspace/models/qwen3-4b
-  output_model_prefix: /workspace/models/qwen3-4b-sft
+  base_model: /workspace/models/qwen3-4b-instruct
+  output_model_prefix: /workspace/models/qwen3-4b-instruct-sft
   load_in_4bit: false
 
 lora:

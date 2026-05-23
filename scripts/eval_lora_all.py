@@ -184,6 +184,21 @@ def prepare_experiments(only: set[str] | None = None, include_base: bool = False
         "cl_lexical": 4,
         "cl_semantic": 5,
         "cl_llm_judge": 6,
+        "cl_length_staged": 10,
+        "cl_perplexity_staged": 11,
+        "cl_lexical_staged": 12,
+        "cl_semantic_staged": 13,
+        "cl_llm_judge_staged": 14,
+        "cl_length_cumulative": 20,
+        "cl_perplexity_cumulative": 21,
+        "cl_lexical_cumulative": 22,
+        "cl_semantic_cumulative": 23,
+        "cl_llm_judge_cumulative": 24,
+        "cl_length_distribution": 30,
+        "cl_perplexity_distribution": 31,
+        "cl_lexical_distribution": 32,
+        "cl_semantic_distribution": 33,
+        "cl_llm_judge_distribution": 34,
     }
     return sorted(experiments, key=lambda x: (order.get(x[0], 99), x[0]))
 

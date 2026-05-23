@@ -26,7 +26,7 @@ trap 'rm -rf "$SINGULARITY_TMPDIR"' EXIT
 
 
 PROJECT_DIR="${PROJECT_DIR:-$HOME/master-cluster-HSE}"
-IMAGE="$PROJECT_DIR/containers/sif/vllm-v100.sif"
+IMAGE="$PROJECT_DIR/containers/sandboxes/vllm-v100"
 CONFIG="${CONFIG:-configs/train/lora_pythoncodes_cl.yaml}"
 MATRIX="${MATRIX:-outputs/cluster/eval_experiments.txt}"
 BENCHMARKS="${EVAL_BENCHMARKS:-mbpp,humaneval}"
@@ -45,7 +45,7 @@ if [ ! -f "$MATRIX" ]; then
   --env PYTHONPATH=/workspace:/workspace/.python_metadata \
   --env HOME=/workspace/.home \
   --env HF_HOME=/workspace/.cache/huggingface \
-  containers/sif/vllm-v100.sif \
+  containers/sandboxes/vllm-v100 \
   bash -lc "cd /workspace && python -u scripts/cluster_make_run_matrices.py --config '$CONFIG'"
 fi
 
@@ -78,7 +78,7 @@ echo "benchmarks=$BENCHMARKS max_new_tokens=$NEW_TOKENS limit=${LIMIT:-none}"
 echo "EVAL_ARGS=$EVAL_ARGS"
 nvidia-smi || true
 
-test -f "$IMAGE" || { echo "Missing image: $IMAGE"; exit 1; }
+test -e "$IMAGE" || { echo "Missing image: $IMAGE"; exit 1; }
 test -d models/qwen3-4b || { echo "Missing model dir: models/qwen3-4b"; exit 1; }
 if [ "$EXP_NAME" != "base" ]; then
   test -f "models/qwen3-4b-sft-$EXP_NAME/adapter_config.json" || { echo "Missing adapter for $EXP_NAME"; exit 1; }
