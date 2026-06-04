@@ -26,17 +26,6 @@ os.environ.setdefault("VLLM_ENABLE_CUDA_COMPATIBILITY", "1")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 
-def optional_import(name: str):
-    try:
-        import importlib
-        module = importlib.import_module(name)
-        print(f"[optional] {name} version={getattr(module, '__version__', '<no __version__>')}")
-        return module
-    except Exception as e:
-        print(f"[optional] {name} not available: {e!r}")
-        return None
-
-
 def env_float(name: str, default: float) -> float:
     raw = os.environ.get(name)
     if raw is None or raw == "":
@@ -284,5 +273,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-# torchao is optional on V100; old torchao versions break PEFT LoRA dispatch.
