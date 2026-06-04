@@ -60,7 +60,7 @@ if [ ! -f "$MATRIX" ]; then
   echo "Missing eval matrix, generating: $MATRIX"
   singularity exec --cleanenv \
     --bind "$PROJECT_DIR:/workspace" \
-    --env PYTHONPATH=/workspace:/workspace/.python_metadata \
+    --env PYTHONPATH=/workspace \
     --env HOME=/workspace/.home \
     --env HF_HOME=/workspace/.cache/huggingface \
     "$IMAGE" \
@@ -103,7 +103,7 @@ echo "EVAL_ARGS=$EVAL_ARGS"
 srun singularity exec --nv --cleanenv \
   --bind "$PROJECT_DIR:/workspace" \
   --env PROJECT_DIR=/workspace \
-  --env PYTHONPATH=/workspace:/workspace/.python_metadata \
+  --env PYTHONPATH=/workspace \
   --env MODELS_DIR=/workspace/models \
   --env DATASETS_DIR=/workspace/datasets \
   --env OUTPUTS_DIR="$EXPERIMENT_OUTPUTS" \
