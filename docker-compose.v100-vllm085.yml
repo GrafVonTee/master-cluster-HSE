@@ -1,0 +1,28 @@
+services:
+  rl-grpo-v100-vllm085:
+    image: master-cluster-hse/rl-grpo-v100-vllm085:latest
+    build:
+      context: .
+      dockerfile: containers/Dockerfile.rl-grpo-v100-vllm085
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    environment:
+      PROJECT_DIR: /workspace
+      PYTHONPATH: /workspace:/workspace/.python_metadata
+      HF_HOME: /workspace/.cache/huggingface
+      HF_DATASETS_CACHE: /workspace/.cache/huggingface/datasets
+      TRANSFORMERS_CACHE: /workspace/.cache/huggingface
+      VLLM_CACHE_ROOT: /workspace/.cache/vllm
+      TORCH_HOME: /workspace/.cache/torch
+      TORCH_EXTENSIONS_DIR: /workspace/.cache/torch_extensions
+      TORCHINDUCTOR_CACHE_DIR: /workspace/.cache/torchinductor
+      TRITON_CACHE_DIR: /workspace/.cache/triton
+      TOKENIZERS_PARALLELISM: "false"
+      VLLM_ENABLE_CUDA_COMPATIBILITY: "1"
+      VLLM_USE_V1: "0"
+      VLLM_ATTENTION_BACKEND: XFORMERS
+      SMOKE_GPU_MEMORY_UTILIZATION: "0.85"
+      SMOKE_MAX_MODEL_LEN: "256"
+    gpus: all
+    command: python -u scripts/smoke_v100_vllm085_stack.py

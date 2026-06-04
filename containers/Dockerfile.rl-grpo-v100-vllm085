@@ -1,0 +1,168 @@
+# V100-oriented candidate for Unsloth + vLLM + GRPO.
+# Base image: vLLM 0.8.5, CUDA 12.4, PyTorch 2.6.0, Python 3.12.
+# Motivation: newer Unsloth Studio image with torch 2.10 / vLLM 0.16-dev
+# works locally on Ada but fails on Tesla V100 (sm_70) in vLLM Qwen3 forward.
+
+ARG BASE_IMAGE=vastai/vllm:v0.8.5-cuda-12.4-pytorch-2.6.0-py312
+FROM ${BASE_IMAGE}
+
+USER root
+SHELL ["/bin/bash", "-lc"]
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG GODOT_VERSION=4.6.3
+ARG GODOT_RELEASE=stable
+ARG CLINGO_VERSION=5.8.0
+
+ENV PROJECT_DIR=/workspace \
+    PYTHONPATH=/workspace:/workspace/.python_metadata \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HOME=/workspace/.cache/huggingface \
+    HF_DATASETS_CACHE=/workspace/.cache/huggingface/datasets \
+    TRANSFORMERS_CACHE=/workspace/.cache/huggingface \
+    VLLM_CACHE_ROOT=/workspace/.cache/vllm \
+    TORCH_HOME=/workspace/.cache/torch \
+    TORCH_EXTENSIONS_DIR=/workspace/.cache/torch_extensions \
+    TORCHINDUCTOR_CACHE_DIR=/workspace/.cache/torchinductor \
+    TRITON_CACHE_DIR=/workspace/.cache/triton \
+    TOKENIZERS_PARALLELISM=false \
+    TORCH_CUDA_ARCH_LIST="7.0;8.9" \
+    VLLM_ENABLE_CUDA_COMPATIBILITY=1 \
+    VLLM_USE_V1=0 \
+    VLLM_ATTENTION_BACKEND=XFORMERS \
+    EVAL_ENABLE_LOGPROBS=1 \
+    HF_HUB_DISABLE_TELEMETRY=1
+
+WORKDIR /workspace
+
+# System utilities, build tools, and minimal libraries for Godot headless.
+RUN set -eux; \
+    mkdir -p /var/lib/apt/lists/partial; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      bash ca-certificates curl wget git git-lfs unzip zip \
+      build-essential cmake ninja-build pkg-config g++ make \
+      procps psmisc jq libffi-dev libstdc++6 libgcc-s1 libgomp1 \
+      libgl1 libglu1-mesa libx11-6 libxext6 libxrender1 libxi6 \
+      libxcursor1 libxinerama1 libxrandr2 libfontconfig1 libfreetype6 \
+      libpulse0 libdbus-1-3 libudev1 xvfb; \
+    (apt-get install -y --no-install-recommends libasound2 || \
+     apt-get install -y --no-install-recommends libasound2t64 || true); \
+    rm -rf /var/lib/apt/lists/*
+
+# Godot is a self-contained binary. Keep it outside /workspace so bind mounts do not hide it.
+RUN set -eux; \
+    cd /tmp; \
+    wget -q "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-${GODOT_RELEASE}/Godot_v${GODOT_VERSION}-${GODOT_RELEASE}_linux.x86_64.zip" -O godot.zip; \
+    unzip -q godot.zip; \
+    install -m 0755 "Godot_v${GODOT_VERSION}-${GODOT_RELEASE}_linux.x86_64" /usr/local/bin/godot; \
+    rm -rf /tmp/godot.zip /tmp/Godot_v${GODOT_VERSION}-${GODOT_RELEASE}_linux.x86_64
+
+# The vastai/vllm image does not expose the vLLM Python as /usr/local/bin/python.
+# Find the interpreter that actually imports torch + vLLM, then create WRAPPERS.
+# Do not symlink a venv interpreter: symlinks can break sys.prefix/site-packages.
+RUN set -eux; \
+    candidates=""; \
+    for p in \
+      /venv/main/bin/python \
+      /opt/venv/bin/python \
+      /opt/vllm/bin/python \
+      /venv/bin/python \
+      /opt/conda/bin/python \
+      /root/miniconda3/bin/python \
+      /usr/local/bin/python \
+      /usr/local/bin/python3 \
+      /usr/bin/python3; do \
+        if [ -x "$p" ]; then candidates="$candidates $p"; fi; \
+    done; \
+    found=""; \
+    for p in $candidates; do \
+        echo "[python-probe] trying $p"; \
+        if "$p" -c 'import sys, torch, vllm; print(sys.executable); print("torch", torch.__version__, "cuda", torch.version.cuda); print("vllm", vllm.__version__)'; then \
+            found="$p"; \
+            break; \
+        fi; \
+    done; \
+    test -n "$found"; \
+    rm -f /usr/local/bin/python /usr/local/bin/pip; \
+    printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "$found" > /usr/local/bin/python; \
+    printf '#!/usr/bin/env bash\nexec "%s" -m pip "$@"\n' "$found" > /usr/local/bin/pip; \
+    chmod +x /usr/local/bin/python /usr/local/bin/pip; \
+    python -c 'import sys, torch, vllm; print("selected_python", sys.executable); print("torch", torch.__version__, "cuda", torch.version.cuda); print("vllm", vllm.__version__)'; \
+    pip --version
+
+# Preserve the base vLLM/PyTorch stack. The previous approach let Unsloth deps
+# rewrite transformers/torchao, after which vLLM could not import ProcessorMixin.
+# We intentionally pin:
+#   - torch + vLLM from the base image;
+#   - transformers 4.55.x, because Unsloth reports 4.55 working on torch2.6/cu124
+#     while 4.56.1 caused generate errors on the same family of setups;
+#   - torchao 0.12.0, because torchao's compatibility table lists it for torch 2.6.
+RUN set -eux; \
+    python -m pip install --upgrade 'pip<26' setuptools wheel; \
+    python - <<'PY' > /tmp/v100-constraints.txt
+import importlib.metadata as md
+
+# Keep the binary/runtime stack from vastai/vllm.
+for name in ("torch", "vllm", "xformers", "triton"):
+    try:
+        print(f"{name}=={md.version(name)}")
+    except md.PackageNotFoundError:
+        pass
+
+# Deliberate compatibility pins.
+print("transformers==4.55.4")
+print("torchao==0.12.0")
+PY
+RUN set -eux; \
+    cat /tmp/v100-constraints.txt; \
+    grep -Eq '^torch==' /tmp/v100-constraints.txt; \
+    grep -Eq '^vllm==' /tmp/v100-constraints.txt; \
+    grep -Eq '^transformers==4\.55\.4$' /tmp/v100-constraints.txt; \
+    grep -Eq '^torchao==0\.12\.0$' /tmp/v100-constraints.txt
+
+# Install runtime/training dependencies while obeying the constraints above.
+# Do NOT install unsloth with dependencies here: its dependency resolver can drift
+# the already-working vLLM environment. Unsloth itself is installed with --no-deps below.
+RUN set -eux; \
+    python -m pip install --no-cache-dir --constraint /tmp/v100-constraints.txt \
+      "transformers==4.55.4" \
+      "torchao==0.12.0" \
+      trl peft accelerate datasets bitsandbytes \
+      sentencepiece protobuf huggingface_hub hf_transfer safetensors \
+      pandas pyarrow pyyaml tqdm tabulate tensorboard \
+      orjson jsonlines scikit-learn matplotlib \
+      pytest pytest-timeout rich psutil human-eval evaluate \
+      "clingo==${CLINGO_VERSION}"; \
+    python -m pip install --no-cache-dir --no-deps \
+      "unsloth_zoo @ git+https://github.com/unslothai/unsloth-zoo.git" \
+      "unsloth @ git+https://github.com/unslothai/unsloth.git"; \
+    printf '%s\n' '#!/usr/bin/env bash' 'exec python -m clingo "$@"' > /usr/local/bin/clingo; \
+    chmod +x /usr/local/bin/clingo
+
+# Build-time validation: avoid importing Unsloth because it may require a visible GPU.
+# vLLM must import successfully here; otherwise dependency drift is still present.
+RUN python - <<'PY'
+import importlib
+import importlib.metadata as md
+
+for name in ["torch", "vllm", "transformers", "tokenizers", "xformers", "triton", "torchao", "trl", "peft", "accelerate", "datasets", "clingo"]:
+    try:
+        print(name, md.version(name))
+    except Exception as e:
+        print(name, "<metadata error>", repr(e))
+
+for name in ["torch", "transformers", "vllm", "trl", "clingo", "torchao"]:
+    m = importlib.import_module(name)
+    print("import_ok", name, getattr(m, "__version__", "<no __version__>"))
+
+from trl import GRPOConfig, GRPOTrainer
+print("trl.GRPOConfig/GRPOTrainer ok")
+import torch
+print("torch_cuda", torch.version.cuda)
+PY
+
+# Do not inherit any service-oriented entrypoint from the base image.
+ENTRYPOINT []
+CMD ["/bin/bash"]

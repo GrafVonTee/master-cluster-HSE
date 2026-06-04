@@ -1,0 +1,62 @@
+#!/bin/bash
+#SBATCH --job-name=smoke-v100-085-stack
+#SBATCH --output=logs/slurm/smoke-v100-vllm085-stack-%j.out
+#SBATCH --error=logs/slurm/smoke-v100-vllm085-stack-%j.err
+#SBATCH --time=00:20:00
+#SBATCH --partition=test
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --gpus=1
+#SBATCH --cpus-per-task=4
+
+set -euo pipefail
+
+PROJECT_DIR="${PROJECT_DIR:-$HOME/master-cluster-HSE}"
+IMAGE="${RL_V100_VLLM085_IMAGE:-$PROJECT_DIR/containers/sandboxes/rl-grpo-v100-vllm085}"
+cd "$PROJECT_DIR"
+
+module purge
+module load singularity/3.9.0
+
+export SINGULARITY_CACHEDIR="$PROJECT_DIR/.singularity/cache"
+export SINGULARITY_TMPDIR="$PROJECT_DIR/.singularity/tmp/${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID:-0}"
+mkdir -p "$SINGULARITY_CACHEDIR" "$SINGULARITY_TMPDIR" logs/slurm .home \
+  .cache/huggingface .cache/vllm .cache/torch .cache/torch_extensions .cache/torchinductor .cache/triton
+trap 'rm -rf "$SINGULARITY_TMPDIR"' EXIT
+
+echo "===== JOB INFO ====="
+echo "job=${SLURM_JOB_ID:-none} node=${SLURMD_NODENAME:-unknown} host=$(hostname)"
+echo "image=$IMAGE"
+echo "VLLM_SMOKE_MODEL=${VLLM_SMOKE_MODEL:-none}"
+nvidia-smi || true
+
+test -e "$IMAGE" || { echo "Missing sandbox: $IMAGE"; exit 1; }
+
+srun singularity exec --nv --cleanenv \
+  --bind "$PROJECT_DIR:/workspace" \
+  --env PROJECT_DIR=/workspace \
+  --env PYTHONPATH=/workspace:/workspace/.python_metadata \
+  --env HOME=/workspace/.home \
+  --env HF_HOME=/workspace/.cache/huggingface \
+  --env HF_DATASETS_CACHE=/workspace/.cache/huggingface/datasets \
+  --env TRANSFORMERS_CACHE=/workspace/.cache/huggingface \
+  --env VLLM_CACHE_ROOT=/workspace/.cache/vllm \
+  --env TORCH_HOME=/workspace/.cache/torch \
+  --env TORCH_EXTENSIONS_DIR=/workspace/.cache/torch_extensions \
+  --env TORCHINDUCTOR_CACHE_DIR=/workspace/.cache/torchinductor \
+  --env TRITON_CACHE_DIR=/workspace/.cache/triton \
+  --env HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1} \
+  --env TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-1} \
+  --env HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1} \
+  --env TOKENIZERS_PARALLELISM=false \
+  --env VLLM_ENABLE_CUDA_COMPATIBILITY=1 \
+  --env VLLM_USE_V1=${VLLM_USE_V1:-0} \
+  --env VLLM_ATTENTION_BACKEND=${VLLM_ATTENTION_BACKEND:-XFORMERS} \
+  --env SMOKE_GPU_MEMORY_UTILIZATION=${SMOKE_GPU_MEMORY_UTILIZATION:-0.85} \
+  --env SMOKE_MAX_MODEL_LEN=${SMOKE_MAX_MODEL_LEN:-256} \
+  --env SMOKE_MAX_TOKENS=${SMOKE_MAX_TOKENS:-8} \
+  --env SMOKE_LOGPROBS=${SMOKE_LOGPROBS:-5} \
+  --env VLLM_SMOKE_MODEL=${VLLM_SMOKE_MODEL:-none} \
+  --env PYTHONUNBUFFERED=1 \
+  "$IMAGE" \
+  bash -lc 'cd /workspace && python -u scripts/smoke_v100_vllm085_stack.py ${VLLM_SMOKE_MODEL:+--model "$VLLM_SMOKE_MODEL"}'
