@@ -17,6 +17,8 @@ IMAGE="${IMAGE:-$PROJECT_DIR/containers/sandboxes/rl-grpo-v100-vllm085}"
 TASK="${TASK:-stack}"                         # stack | qwen3 | train | eval
 MODEL="${MODEL:-${VLLM_SMOKE_MODEL:-/workspace/models/qwen3-4b}}"
 TRAIN_RUN="${TRAIN_RUN:-${TRAIN_SMOKE_RUN:-cl_length_staged}}"
+EVAL_RUN="${EVAL_RUN:-$TRAIN_RUN}"
+EVAL_INCLUDE_BASE="${EVAL_INCLUDE_BASE:-0}"
 
 SMOKE_GPU_MEMORY_UTILIZATION="${SMOKE_GPU_MEMORY_UTILIZATION:-0.85}"
 SMOKE_MAX_MODEL_LEN="${SMOKE_MAX_MODEL_LEN:-256}"
@@ -47,6 +49,8 @@ echo "project=$PROJECT_DIR"
 echo "image=$IMAGE"
 echo "model=$MODEL"
 echo "train_run=$TRAIN_RUN"
+echo "eval_run=$EVAL_RUN"
+echo "eval_include_base=$EVAL_INCLUDE_BASE"
 
 test -d "$IMAGE" || { echo "ERROR: sandbox not found: $IMAGE" >&2; exit 2; }
 
@@ -87,6 +91,8 @@ export SINGULARITYENV_TRAIN_VAL_SIZE_OVERRIDE="$TRAIN_VAL_SIZE_OVERRIDE"
 
 export EVAL_ENABLE_LOGPROBS=1
 export SINGULARITYENV_EVAL_ENABLE_LOGPROBS=1
+export SINGULARITYENV_EVAL_RUN="$EVAL_RUN"
+export SINGULARITYENV_EVAL_INCLUDE_BASE="$EVAL_INCLUDE_BASE"
 
 run_in_container() {
   srun singularity exec --nv \
@@ -161,11 +167,18 @@ case "$TASK" in
     echo "EVAL_BENCHMARKS=$EVAL_BENCHMARKS"
     echo "EVAL_LIMIT=$EVAL_LIMIT"
 
-    run_in_container python -u scripts/eval_lora_all.py \
-      --benchmarks "$EVAL_BENCHMARKS" \
-      --limit "$EVAL_LIMIT" \
-      --include-base \
-      --only base
+    if [ "$EVAL_INCLUDE_BASE" = "1" ]; then
+      run_in_container python -u scripts/eval_lora_all.py \
+        --benchmarks "$EVAL_BENCHMARKS" \
+        --limit "$EVAL_LIMIT" \
+        --include-base \
+        --only base "$EVAL_RUN"
+    else
+      run_in_container python -u scripts/eval_lora_all.py \
+        --benchmarks "$EVAL_BENCHMARKS" \
+        --limit "$EVAL_LIMIT" \
+        --only "$EVAL_RUN"
+    fi
     ;;
 
   *)
