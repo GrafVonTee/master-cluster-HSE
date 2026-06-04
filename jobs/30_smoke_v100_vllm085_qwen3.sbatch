@@ -2,7 +2,7 @@
 #SBATCH --job-name=smoke-v100-085-qwen3
 #SBATCH --output=logs/slurm/smoke-v100-vllm085-qwen3-%j.out
 #SBATCH --error=logs/slurm/smoke-v100-vllm085-qwen3-%j.err
-#SBATCH --time=00:45:00
+#SBATCH --time=00:30:00
 #SBATCH --partition=test
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
