@@ -2,8 +2,7 @@
 #SBATCH --job-name=rl-v100-vllm085
 #SBATCH --partition=test
 #SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=48G
+#SBATCH --cpus-per-task=2
 #SBATCH --time=00:30:00
 #SBATCH --output=logs/slurm/rl-v100-vllm085-%x-%j.out
 #SBATCH --error=logs/slurm/rl-v100-vllm085-%x-%j.err
