@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --partition=test
 #SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=2
 #SBATCH --time=00:30:00
 
 #SBATCH --job-name=smoke-v100-vllm085-qwen3
