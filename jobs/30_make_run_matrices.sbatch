@@ -24,8 +24,8 @@ cd "$PROJECT_DIR"
 mkdir -p logs/slurm outputs/cluster
 singularity exec --cleanenv \
   --bind "$PWD:/workspace" \
-  --env PYTHONPATH=/workspace:/workspace/.python_metadata \
+  --env PYTHONPATH=/workspace \
   --env HOME=/workspace/.home \
   --env HF_HOME=/workspace/.cache/huggingface \
   containers/sif/vllm-v100.sif \
-  bash -lc "cd /workspace && python -u scripts/cluster_make_run_matrices.py --config '$CONFIG'" 
+  bash -lc "cd /workspace && python -u scripts/cluster_make_run_matrices.py --config '$CONFIG'"
