@@ -20,6 +20,7 @@ logs/*
 
 outputs/*
 !outputs/.gitkeep
+cluster_outputs/*
 
 datasets/*
 !datasets/.gitkeep

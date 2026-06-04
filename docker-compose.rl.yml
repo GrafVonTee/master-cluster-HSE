@@ -1,0 +1,43 @@
+services:
+  rl-grpo:
+    build:
+      context: .
+      dockerfile: containers/Dockerfile.rl-grpo
+    image: master-cluster-hse/rl-grpo:latest
+    container_name: master-cluster-hse-rl-grpo
+    working_dir: /workspace
+    user: root
+    volumes:
+      - .:/workspace
+    ipc: host
+    shm_size: "16g"
+    gpus: all
+    ports:
+      - "8888:8888"
+      - "8000:8000"
+      - "6006:6006"
+    environment:
+      PROJECT_DIR: /workspace
+      PYTHONPATH: /workspace:/workspace/.python_metadata
+      HF_HOME: /workspace/.cache/huggingface
+      HF_DATASETS_CACHE: /workspace/.cache/huggingface/datasets
+      TRANSFORMERS_CACHE: /workspace/.cache/huggingface
+      VLLM_CACHE_ROOT: /workspace/.cache/vllm
+      TORCH_HOME: /workspace/.cache/torch
+      TORCH_EXTENSIONS_DIR: /workspace/.cache/torch_extensions
+      TORCHINDUCTOR_CACHE_DIR: /workspace/.cache/torchinductor
+      TRITON_CACHE_DIR: /workspace/.cache/triton
+      TOKENIZERS_PARALLELISM: "false"
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      TORCH_CUDA_ARCH_LIST: "7.0;8.9"
+      VLLM_ENABLE_CUDA_COMPATIBILITY: "1"
+      MAX_TOKENS: 2048
+      GPU_MEMORY_UTILIZATION: 0.88
+      SMOKE_GPU_MEMORY_UTILIZATION: 0.85
+      SMOKE_MAX_MODEL_LEN: 256
+      EVAL_MAX_NEW_TOKENS: 512
+      EVAL_ENABLE_LOGPROBS: "1"
+    entrypoint: ["/bin/bash", "-lc"]
+    command: "python -u scripts/smoke_rl_container.py --quick"

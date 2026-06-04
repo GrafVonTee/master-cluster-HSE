@@ -1,0 +1,136 @@
+# Unified CL/RL stack for local RTX 4070 Ti Super and cluster V100 32GB.
+# Goal: do not compile torch/vLLM/Unsloth in this repository layer.
+# We extend the already coherent Unsloth image and add only project utilities,
+# code-eval runtimes, and smoke-test tooling.
+
+ARG BASE_IMAGE=unsloth/unsloth:2026.4.8-pt2.10.0-vllm-0.16.0-cu12.8-studio-release-v0.1.37-beta-fix-startup
+FROM ${BASE_IMAGE}
+
+# The upstream Unsloth image may switch to a non-root user before our layer.
+# apt/dpkg must run as root, otherwise /var/lib/apt/lists/partial cannot be created.
+USER root
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG GODOT_VERSION=4.6.3
+ARG GODOT_RELEASE=stable
+ARG CLINGO_VERSION=5.8.0
+ARG TORCHAO_VERSION=0.16.0
+
+ENV PROJECT_DIR=/workspace \
+    PYTHONPATH=/workspace:/workspace/.python_metadata \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HOME=/workspace/.cache/huggingface \
+    HF_DATASETS_CACHE=/workspace/.cache/huggingface/datasets \
+    TRANSFORMERS_CACHE=/workspace/.cache/huggingface \
+    VLLM_CACHE_ROOT=/workspace/.cache/vllm \
+    TORCH_HOME=/workspace/.cache/torch \
+    TORCH_EXTENSIONS_DIR=/workspace/.cache/torch_extensions \
+    TORCHINDUCTOR_CACHE_DIR=/workspace/.cache/torchinductor \
+    TRITON_CACHE_DIR=/workspace/.cache/triton \
+    XDG_CACHE_HOME=/workspace/.cache \
+    TOKENIZERS_PARALLELISM=false \
+    CUDA_DEVICE_ORDER=PCI_BUS_ID \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+    TORCH_CUDA_ARCH_LIST="7.0;8.9" \
+    VLLM_ENABLE_CUDA_COMPATIBILITY=1 \
+    VLLM_WORKER_MULTIPROC_METHOD=spawn \
+    MAX_TOKENS=2048 \
+    GPU_MEMORY_UTILIZATION=0.88 \
+    EVAL_MAX_NEW_TOKENS=512 \
+    EVAL_ENABLE_LOGPROBS=1 \
+    GODOT_BIN=/usr/local/bin/godot
+
+WORKDIR /workspace
+
+# System layer for Python package builds, Singularity runtime checks, and Godot headless execution.
+# xvfb is included as a fallback for projects/plugins that still probe display APIs even in headless mode.
+RUN mkdir -p /var/lib/apt/lists/partial \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+      bash \
+      ca-certificates \
+      curl \
+      wget \
+      git \
+      git-lfs \
+      unzip \
+      zip \
+      build-essential \
+      cmake \
+      ninja-build \
+      pkg-config \
+      g++ \
+      make \
+      procps \
+      psmisc \
+      jq \
+      libffi-dev \
+      libstdc++6 \
+      libgcc-s1 \
+      libgomp1 \
+      libgl1 \
+      libglu1-mesa \
+      libx11-6 \
+      libxext6 \
+      libxrender1 \
+      libxi6 \
+      libxcursor1 \
+      libxinerama1 \
+      libxrandr2 \
+      libfontconfig1 \
+      libfreetype6 \
+      libasound2 \
+      libpulse0 \
+      libdbus-1-3 \
+      libudev1 \
+      xvfb \
+    && rm -rf /var/lib/apt/lists/*
+
+# Godot is self-contained. We pin the minor version via build args so future GDScript datasets
+# can change only GODOT_VERSION without touching Python/CUDA layers.
+RUN set -eux; \
+    GODOT_ZIP="Godot_v${GODOT_VERSION}-${GODOT_RELEASE}_linux.x86_64.zip"; \
+    GODOT_URL="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-${GODOT_RELEASE}/${GODOT_ZIP}"; \
+    wget -q -O "/tmp/${GODOT_ZIP}" "${GODOT_URL}"; \
+    unzip -q "/tmp/${GODOT_ZIP}" -d /opt/godot; \
+    GODOT_EXE="$(find /opt/godot -maxdepth 1 -type f -name 'Godot*_linux.x86_64' | head -n 1)"; \
+    chmod +x "${GODOT_EXE}"; \
+    ln -sf "${GODOT_EXE}" /usr/local/bin/godot; \
+    godot --version; \
+    rm -f "/tmp/${GODOT_ZIP}"
+
+# Do not reinstall torch, vLLM, triton, xformers or unsloth here. The base image pins them together.
+# We do repair torchao because the previous logs showed skipped C++ extensions with torchao 0.14.0.
+RUN set -eux; \
+    python -m pip install --upgrade pip setuptools wheel; \
+    python -m pip install --no-cache-dir \
+      pandas pyarrow pyyaml tqdm tabulate tensorboard \
+      orjson jsonlines scikit-learn matplotlib \
+      pytest pytest-timeout rich psutil human-eval evaluate \
+      "clingo==${CLINGO_VERSION}"; \
+    python -m pip install --no-cache-dir --upgrade "torchao==${TORCHAO_VERSION}" --index-url https://download.pytorch.org/whl/cu128 \
+      || python -m pip install --no-cache-dir --upgrade "torchao==${TORCHAO_VERSION}"; \
+    python - <<'PY'
+# Build-time validation must not import Unsloth: docker build normally has no GPU,
+# while Unsloth intentionally fails on import when no CUDA accelerator is visible.
+# Full Unsloth/vLLM/GRPO validation is performed by scripts/smoke_rl_container.py
+# at runtime via docker compose gpus: all or singularity exec --nv.
+import importlib
+for name in ["torch", "vllm", "clingo", "torchao"]:
+    m = importlib.import_module(name)
+    print(name, getattr(m, "__version__", "<no __version__>"))
+PY
+
+# The PyPI clingo wheel exposes the Python module but may not install a `clingo` CLI
+# executable in this base image. Provide a stable wrapper for ASP dataset validators.
+RUN printf '#!/usr/bin/env bash\nexec python -m clingo "$@"\n' > /usr/local/bin/clingo \
+    && chmod +x /usr/local/bin/clingo \
+    && clingo --version
+
+# The upstream Unsloth image starts Jupyter/SSH/Studio via its own entrypoint.
+# Reset it so `docker run IMAGE nvidia-smi`, compose commands, and Singularity exec
+# run the requested command directly instead of starting supervisord.
+ENTRYPOINT []
+CMD ["/bin/bash"]
