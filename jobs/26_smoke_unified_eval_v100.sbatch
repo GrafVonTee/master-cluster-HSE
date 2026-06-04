@@ -31,6 +31,21 @@ echo "job=${SLURM_JOB_ID:-none} node=${SLURMD_NODENAME:-unknown} host=$(hostname
 echo "image=$IMAGE SELECTED_MODEL=$SELECTED_MODEL"
 nvidia-smi || true
 
+GPU_NAME="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n1 || true)"
+echo "detected_gpu=$GPU_NAME"
+if [[ "$GPU_NAME" == *"V100"* ]]; then
+  # V100 is compute capability 7.0. The latest vLLM V1/CUDA stack can select
+  # kernels/backends that are not compiled for sm_70. Prefer the legacy engine
+  # and xFormers attention on V100 unless the caller overrides these explicitly.
+  export VLLM_USE_V1="${VLLM_USE_V1:-0}"
+  export VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-XFORMERS}"
+else
+  export VLLM_USE_V1="${VLLM_USE_V1:-}"
+  export VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-}"
+fi
+echo "VLLM_USE_V1=${VLLM_USE_V1:-<unset>}"
+echo "VLLM_ATTENTION_BACKEND=${VLLM_ATTENTION_BACKEND:-<unset>}"
+
 test -e "$IMAGE" || { echo "Missing sandbox: $IMAGE"; exit 1; }
 
 srun singularity exec --nv --cleanenv \
@@ -54,6 +69,9 @@ srun singularity exec --nv --cleanenv \
   --env TRANSFORMERS_OFFLINE=1 \
   --env HF_DATASETS_OFFLINE=1 \
   --env TOKENIZERS_PARALLELISM=false \
+  --env VLLM_ENABLE_CUDA_COMPATIBILITY=1 \
+  --env VLLM_USE_V1="${VLLM_USE_V1:-}" \
+  --env VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-}" \
   --env SELECTED_MODEL="$SELECTED_MODEL" \
   --env MAX_TOKENS=${MAX_TOKENS:-2048} \
   --env GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.88} \

@@ -30,6 +30,21 @@ echo "image=$IMAGE"
 echo "VLLM_SMOKE_MODEL=${VLLM_SMOKE_MODEL:-none}"
 nvidia-smi || true
 
+GPU_NAME="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n1 || true)"
+echo "detected_gpu=$GPU_NAME"
+if [[ "$GPU_NAME" == *"V100"* ]]; then
+  # V100 is compute capability 7.0. The latest vLLM V1/CUDA stack can select
+  # kernels/backends that are not compiled for sm_70. Prefer the legacy engine
+  # and xFormers attention on V100 unless the caller overrides these explicitly.
+  export VLLM_USE_V1="${VLLM_USE_V1:-0}"
+  export VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-XFORMERS}"
+else
+  export VLLM_USE_V1="${VLLM_USE_V1:-}"
+  export VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-}"
+fi
+echo "VLLM_USE_V1=${VLLM_USE_V1:-<unset>}"
+echo "VLLM_ATTENTION_BACKEND=${VLLM_ATTENTION_BACKEND:-<unset>}"
+
 test -e "$IMAGE" || { echo "Missing image: $IMAGE"; exit 1; }
 
 MODEL_ARG=""
@@ -53,6 +68,8 @@ srun singularity exec --nv --cleanenv \
   --env TOKENIZERS_PARALLELISM=false \
   --env TORCH_CUDA_ARCH_LIST="7.0;8.9" \
   --env VLLM_ENABLE_CUDA_COMPATIBILITY=1 \
+  --env VLLM_USE_V1="${VLLM_USE_V1:-}" \
+  --env VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-}" \
   --env EVAL_ENABLE_LOGPROBS=1 \
   --env MAX_TOKENS=2048 \
   --env GPU_MEMORY_UTILIZATION=0.88 \

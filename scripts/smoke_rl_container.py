@@ -92,6 +92,8 @@ def check_python_env() -> None:
         "NVIDIA_VISIBLE_DEVICES",
         "TORCH_CUDA_ARCH_LIST",
         "VLLM_ENABLE_CUDA_COMPATIBILITY",
+        "VLLM_USE_V1",
+        "VLLM_ATTENTION_BACKEND",
         "EVAL_ENABLE_LOGPROBS",
     ]:
         print(f"{key}={os.environ.get(key)}", flush=True)
@@ -111,10 +113,32 @@ def check_imports() -> None:
 
     print("gpu", torch.cuda.get_device_name(0), flush=True)
     print("capability", torch.cuda.get_device_capability(0), flush=True)
-    # Tiny allocation catches many broken CUDA/driver/container combinations.
+    print("torch.version.cuda", getattr(torch.version, "cuda", None), flush=True)
+    try:
+        print("torch_cuda_arch_list", torch.cuda.get_arch_list(), flush=True)
+    except Exception as exc:
+        print(f"torch_cuda_arch_list_error={type(exc).__name__}: {exc}", flush=True)
+
+    # Tiny allocation catches basic broken CUDA/driver/container combinations.
     x = torch.ones((8, 8), device="cuda")
     print("cuda_tensor_sum", float(x.sum().item()), flush=True)
     del x
+
+    # This catches the class of failures that later appears inside vLLM as
+    # cudaErrorNoKernelImageForDevice during qkv/linear projections on V100.
+    # A tensor allocation can pass even when fp16 GEMM kernels are missing for sm_70.
+    a = torch.randn((128, 128), device="cuda", dtype=torch.float16)
+    b = torch.randn((128, 128), device="cuda", dtype=torch.float16)
+    c = a @ b
+    torch.cuda.synchronize()
+    print("cuda_fp16_matmul_mean", float(c.float().mean().item()), flush=True)
+    del a, b, c
+
+    lin = torch.nn.Linear(128, 128, bias=False, dtype=torch.float16, device="cuda")
+    y = lin(torch.randn((4, 128), device="cuda", dtype=torch.float16))
+    torch.cuda.synchronize()
+    print("cuda_fp16_linear_mean", float(y.float().mean().item()), flush=True)
+    del lin, y
 
     # Unsloth must be imported before transformers/trl so its patches are installed first.
     import_report("unsloth")
@@ -260,12 +284,18 @@ def check_vllm_logprobs(model_path: str) -> None:
             flush=True,
         )
 
+    vllm_use_v1 = os.environ.get("VLLM_USE_V1", "<unset>")
+    vllm_attention_backend = os.environ.get("VLLM_ATTENTION_BACKEND", "<unset>")
     print(
         "vllm_smoke_config "
         f"dtype={dtype} max_model_len={max_model_len} max_tokens={max_tokens} "
-        f"logprobs={logprobs} enforce_eager={enforce_eager}",
+        f"logprobs={logprobs} enforce_eager={enforce_eager} "
+        f"VLLM_USE_V1={vllm_use_v1} VLLM_ATTENTION_BACKEND={vllm_attention_backend}",
         flush=True,
     )
+
+    if vllm_attention_backend.upper() == "XFORMERS":
+        import_report("xformers")
 
     llm = LLM(
         model=str(path) if path.exists() else model_path,
