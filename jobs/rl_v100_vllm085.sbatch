@@ -31,6 +31,9 @@ TRAIN_VAL_SIZE_OVERRIDE="${TRAIN_VAL_SIZE_OVERRIDE:-50}"
 
 EVAL_LIMIT="${EVAL_LIMIT:-2}"
 EVAL_BENCHMARKS="${EVAL_BENCHMARKS:-mbpp,humaneval}"
+GRPO_CONFIG="${GRPO_CONFIG:-configs/rl/grpo_pythoncodes.yaml}"
+GRPO_RUN_NAME="${GRPO_RUN_NAME:-grpo_pythoncodes}"
+GRPO_EVAL_LIMIT="${GRPO_EVAL_LIMIT:-2}"
 
 mkdir -p "$PROJECT_DIR/logs/slurm"
 mkdir -p "$PROJECT_DIR/.cache/huggingface/datasets" \
@@ -59,6 +62,10 @@ nvidia-smi || true
 # Keep repo importable, but do not expose stale package metadata.
 export PYTHONPATH=/workspace
 export SINGULARITYENV_PYTHONPATH=/workspace
+
+# Disable Unsloth statistics/download probes. Required for offline/local model runs.
+export UNSLOTH_DISABLE_STATISTICS=1
+export SINGULARITYENV_UNSLOTH_DISABLE_STATISTICS=1
 
 # Runtime caches inside mounted project dir.
 export HF_HOME=/workspace/.cache/huggingface
@@ -91,6 +98,8 @@ export SINGULARITYENV_TRAIN_VAL_SIZE_OVERRIDE="$TRAIN_VAL_SIZE_OVERRIDE"
 
 export EVAL_ENABLE_LOGPROBS=1
 export SINGULARITYENV_EVAL_ENABLE_LOGPROBS=1
+export SINGULARITYENV_GRPO_CONFIG="$GRPO_CONFIG"
+export SINGULARITYENV_GRPO_RUN_NAME="$GRPO_RUN_NAME"
 export SINGULARITYENV_EVAL_RUN="$EVAL_RUN"
 export SINGULARITYENV_EVAL_INCLUDE_BASE="$EVAL_INCLUDE_BASE"
 
@@ -181,9 +190,31 @@ case "$TASK" in
     fi
     ;;
 
+
+  grpo_train)
+    precheck_versions
+    echo "===== GRPO TRAIN ====="
+    echo "GRPO_CONFIG=$GRPO_CONFIG"
+    echo "GRPO_RUN_NAME=$GRPO_RUN_NAME"
+    run_in_container python -u scripts/rl_train_pythoncodes_grpo.py \
+      --config "$GRPO_CONFIG" \
+      --run-name "$GRPO_RUN_NAME" \
+      --local-files-only
+    ;;
+
+  grpo_eval)
+    precheck_versions
+    echo "===== GRPO EVAL ====="
+    run_in_container python -u scripts/rl_eval_grpo_adapter.py \
+      --run-name "$GRPO_RUN_NAME" \
+      --benchmarks "$EVAL_BENCHMARKS" \
+      --limit "$GRPO_EVAL_LIMIT" \
+      --include-base
+    ;;
+
   *)
     echo "ERROR: unknown TASK=$TASK" >&2
-    echo "Supported: TASK=stack | qwen3 | train | eval" >&2
+    echo "Supported: TASK=stack | qwen3 | train | eval | grpo_train | grpo_eval" >&2
     exit 2
     ;;
 esac

@@ -119,8 +119,7 @@ RUN set -eux; \
     cat /tmp/v100-constraints.txt; \
     grep -Eq '^torch==' /tmp/v100-constraints.txt; \
     grep -Eq '^vllm==' /tmp/v100-constraints.txt; \
-    grep -Eq '^transformers==4\.55\.4$' /tmp/v100-constraints.txt; \
-    grep -Eq '^torchao==0\.12\.0$' /tmp/v100-constraints.txt
+    grep -Eq '^transformers==4\.55\.4$' /tmp/v100-constraints.txt; 
 
 # Install runtime/training dependencies while obeying the constraints above.
 # Do NOT install unsloth with dependencies here: its dependency resolver can drift
@@ -128,7 +127,6 @@ RUN set -eux; \
 RUN set -eux; \
     python -m pip install --no-cache-dir --constraint /tmp/v100-constraints.txt \
       "transformers==4.55.4" \
-      "torchao==0.12.0" \
       trl peft accelerate datasets bitsandbytes \
       sentencepiece protobuf huggingface_hub hf_transfer safetensors \
       pandas pyarrow pyyaml tqdm tabulate tensorboard \
@@ -140,6 +138,16 @@ RUN set -eux; \
       "unsloth @ git+https://github.com/unslothai/unsloth.git"; \
     printf '%s\n' '#!/usr/bin/env bash' 'exec python -m clingo "$@"' > /usr/local/bin/clingo; \
     chmod +x /usr/local/bin/clingo
+# PEFT 0.19+ treats old torchao as an error during LoRA injection.
+# For V100 + torch 2.6, torchao is not required for our LoRA/GRPO/vLLM path.
+RUN set -eux; \
+    python -m pip uninstall -y torchao || true; \
+    python - <<'PY'
+import importlib.util
+print("torchao_spec_after_uninstall", importlib.util.find_spec("torchao"))
+PY
+
+
 
 # Build-time validation: avoid importing Unsloth because it may require a visible GPU.
 # vLLM must import successfully here; otherwise dependency drift is still present.

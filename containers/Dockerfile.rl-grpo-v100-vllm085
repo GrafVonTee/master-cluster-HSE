@@ -155,13 +155,13 @@ RUN python - <<'PY'
 import importlib
 import importlib.metadata as md
 
-for name in ["torch", "vllm", "transformers", "tokenizers", "xformers", "triton", "torchao", "trl", "peft", "accelerate", "datasets", "clingo"]:
+for name in ["torch", "vllm", "transformers", "tokenizers", "xformers", "triton", "trl", "peft", "accelerate", "datasets", "clingo"]:
     try:
         print(name, md.version(name))
     except Exception as e:
         print(name, "<metadata error>", repr(e))
 
-for name in ["torch", "transformers", "vllm", "trl", "clingo", "torchao"]:
+for name in ["torch", "transformers", "vllm", "trl", "clingo"]:
     m = importlib.import_module(name)
     print("import_ok", name, getattr(m, "__version__", "<no __version__>"))
 

@@ -1,0 +1,73 @@
+# Minimal, V100-oriented GRPO config for Python code generation.
+# This config is deliberately conservative. Override from Slurm via env vars
+# such as RL_MAX_STEPS_OVERRIDE, RL_DATASET_LIMIT_OVERRIDE, RL_NUM_GENERATIONS.
+
+run:
+  name: grpo_pythoncodes
+  seed: 42
+
+model:
+  base_model: /workspace/models/qwen3-4b-instruct-2507
+  output_dir: /workspace/models/qwen3-4b-instruct-2507-sft-grpo_pythoncodes
+  max_seq_length: 2048
+  load_in_4bit: false
+  fast_inference: true
+  gpu_memory_utilization: 0.70
+  local_files_only: true
+
+lora:
+  r: 32
+  alpha: 32
+  dropout: 0.0
+  bias: none
+  use_gradient_checkpointing: unsloth
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+
+dataset:
+  disk_path: /workspace/datasets/pythoncodes_cl_scored
+  parquet_path: /workspace/outputs/curriculum_array/pythoncodes_cl_scored.parquet
+  split: train
+  limit: 256
+  seed: 42
+  prompt_format: chat     # chat | text
+  min_reference_chars: 10
+
+reward:
+  timeout: 2.0
+  weights:
+    syntax: 0.30
+    reference_similarity: 0.55
+    function_keyword: 0.10
+    test_pass_ratio: 1.00
+    length_penalty: 0.05
+  length:
+    min_chars: 30
+    max_chars: 3000
+
+training:
+  output_dir: /workspace/outputs/rl/grpo_pythoncodes
+  logging_dir: /workspace/outputs/runs/rl/grpo_pythoncodes
+  max_steps: 10
+  learning_rate: 0.000005
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 1
+  num_generations: 2
+  max_prompt_length: 1024
+  max_completion_length: 512
+  warmup_steps: 0
+  logging_steps: 1
+  save_steps: 10
+  save_total_limit: 2
+  report_to: tensorboard
+  beta: 0.0
+  use_vllm: true
+  vllm_gpu_memory_utilization: 0.70
+  remove_unused_columns: false
+  dataloader_num_workers: 0

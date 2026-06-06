@@ -51,7 +51,7 @@ test -e "$IMAGE" || { echo "Missing sandbox: $IMAGE"; exit 1; }
 srun singularity exec --nv --cleanenv \
   --bind "$PROJECT_DIR:/workspace" \
   --env PROJECT_DIR=/workspace \
-  --env PYTHONPATH=/workspace:/workspace/.python_metadata \
+  --env PYTHONPATH=/workspace \
   --env MODELS_DIR=/workspace/models \
   --env DATASETS_DIR=/workspace/datasets \
   --env OUTPUTS_DIR=/workspace/outputs/eval_jobs/base \
