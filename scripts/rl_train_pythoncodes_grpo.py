@@ -35,6 +35,34 @@ from src.rl.pythoncodes_dataset import prepare_pythoncodes_grpo_dataset
 from src.rl.rewards import PythonRewardConfig, make_python_reward
 
 
+
+def env_flag(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+def env_float(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    return float(value)
+
+def env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    return int(value)
+
+def filter_dataclass_kwargs(cls, kwargs: dict) -> dict:
+    try:
+        import dataclasses
+        names = {f.name for f in dataclasses.fields(cls)}
+        return {k: v for k, v in kwargs.items() if k in names}
+    except Exception:
+        return kwargs
+
+
 def _model_kwargs(model_cfg: dict[str, Any], lora_cfg: dict[str, Any]) -> dict[str, Any]:
     kwargs = {
         "model_name": model_cfg["base_model"],

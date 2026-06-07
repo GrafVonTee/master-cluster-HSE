@@ -71,3 +71,9 @@ training:
   vllm_gpu_memory_utilization: 0.70
   remove_unused_columns: false
   dataloader_num_workers: 0
+
+# V100 GRPO/vLLM stability defaults. Environment variables still override these in scripts.
+vllm_runtime:
+  enforce_eager: true
+  disable_custom_all_reduce: true
+  gpu_memory_utilization: 0.69
