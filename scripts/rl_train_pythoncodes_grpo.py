@@ -63,6 +63,82 @@ def filter_dataclass_kwargs(cls, kwargs: dict) -> dict:
         return kwargs
 
 
+
+def env_flag(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+def env_float(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    return float(value)
+
+def force_vllm_eager_runtime_patch() -> None:
+    # Force vLLM eager mode even when Unsloth constructs vLLM internally.
+    if not env_flag("RL_FORCE_VLLM_EAGER_PATCH", True):
+        print("[rl] RL_FORCE_VLLM_EAGER_PATCH=0; vLLM eager runtime patch disabled")
+        return
+
+    try:
+        import vllm
+        from vllm.entrypoints.llm import LLM
+    except Exception as e:
+        print(f"[rl] vLLM eager runtime patch skipped: {e!r}")
+        return
+
+    if getattr(LLM.__init__, "_rl_eager_patched", False):
+        print("[rl] vLLM LLM.__init__ already patched")
+        return
+
+    original_init = LLM.__init__
+
+    def patched_init(self, *args, **kwargs):
+        kwargs["enforce_eager"] = True
+
+        if env_flag("RL_VLLM_DISABLE_CUSTOM_ALL_REDUCE", True):
+            kwargs["disable_custom_all_reduce"] = True
+
+        if "RL_VLLM_GPU_MEMORY_UTILIZATION" in os.environ:
+            kwargs["gpu_memory_utilization"] = env_float(
+                "RL_VLLM_GPU_MEMORY_UTILIZATION",
+                float(kwargs.get("gpu_memory_utilization", 0.69)),
+            )
+
+        compilation_config = kwargs.get("compilation_config")
+        if compilation_config is None:
+            compilation_config = {}
+        if isinstance(compilation_config, dict):
+            compilation_config = dict(compilation_config)
+            compilation_config.setdefault("level", 0)
+            compilation_config["use_cudagraph"] = False
+            compilation_config["cudagraph_capture_sizes"] = []
+            compilation_config["max_capture_size"] = 0
+            kwargs["compilation_config"] = compilation_config
+
+        print(
+            "[rl] forced vLLM kwargs:",
+            {
+                "enforce_eager": kwargs.get("enforce_eager"),
+                "disable_custom_all_reduce": kwargs.get("disable_custom_all_reduce"),
+                "gpu_memory_utilization": kwargs.get("gpu_memory_utilization"),
+                "compilation_config": kwargs.get("compilation_config"),
+            },
+        )
+        return original_init(self, *args, **kwargs)
+
+    patched_init._rl_eager_patched = True
+    LLM.__init__ = patched_init
+    try:
+        vllm.LLM.__init__ = patched_init
+    except Exception:
+        pass
+
+    print("[rl] patched vllm.LLM.__init__ to force enforce_eager=True")
+
+
 def _model_kwargs(model_cfg: dict[str, Any], lora_cfg: dict[str, Any]) -> dict[str, Any]:
     kwargs = {
         "model_name": model_cfg["base_model"],
