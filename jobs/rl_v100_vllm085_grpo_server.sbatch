@@ -15,13 +15,17 @@ PROJECT_DIR="${PROJECT_DIR:-$PWD}"
 IMAGE="${IMAGE:-$PROJECT_DIR/containers/sandboxes/rl-grpo-v100-vllm085}"
 
 MODEL="${MODEL:-/workspace/models/qwen3-4b-instruct-2507}"
-PORT="${GRPO_VLLM_SERVER_PORT:-8000}"
-HOST="${GRPO_VLLM_SERVER_HOST:-127.0.0.1}"
+HTTP_PORT="${GRPO_VLLM_SERVER_PORT:-8000}"
+GROUP_PORT="${GRPO_VLLM_GROUP_PORT:-$((51216 + SLURM_JOB_ID % 10000))}"
 
-RUN_NAME="${GRPO_RUN_NAME:-grpo_pythoncodes_server}"
+# Avoid 127.0.0.1 for the communicator. Use node IP.
+HOST_IP="${GRPO_VLLM_SERVER_HOST:-$(hostname -I | awk '{print $1}')}"
+BIND_HOST="${GRPO_VLLM_BIND_HOST:-0.0.0.0}"
+
+RUN_NAME="${GRPO_RUN_NAME:-grpo_pythoncodes_server_smoke}"
 CONFIG="${GRPO_CONFIG:-configs/rl/grpo_pythoncodes.yaml}"
 
-SERVER_GPU_UTIL="${SERVER_GPU_UTIL:-0.35}"
+SERVER_GPU_UTIL="${SERVER_GPU_UTIL:-0.30}"
 SERVER_MAX_MODEL_LEN="${SERVER_MAX_MODEL_LEN:-2048}"
 SERVER_DTYPE="${SERVER_DTYPE:-float16}"
 SERVER_MODEL_IMPL="${SERVER_MODEL_IMPL:-vllm}"
@@ -36,17 +40,14 @@ mkdir -p logs/slurm outputs/rl \
 
 echo "===== JOB INFO ====="
 echo "job=${SLURM_JOB_ID:-none}"
-echo "host=$(hostname)"
-echo "project=$PROJECT_DIR"
+echo "node=$(hostname)"
+echo "host_ip=$HOST_IP"
+echo "bind_host=$BIND_HOST"
+echo "http_port=$HTTP_PORT"
+echo "group_port=$GROUP_PORT"
 echo "image=$IMAGE"
 echo "model=$MODEL"
 echo "run_name=$RUN_NAME"
-echo "server=${HOST}:${PORT}"
-echo "server_gpu_util=$SERVER_GPU_UTIL"
-echo "server_max_model_len=$SERVER_MAX_MODEL_LEN"
-echo "server_dtype=$SERVER_DTYPE"
-echo "server_model_impl=$SERVER_MODEL_IMPL"
-echo "server_enforce_eager=$SERVER_ENFORCE_EAGER"
 
 test -d "$IMAGE" || { echo "ERROR: sandbox not found: $IMAGE" >&2; exit 2; }
 
@@ -73,17 +74,18 @@ export SINGULARITYENV_TORCH_EXTENSIONS_DIR="$TORCH_EXTENSIONS_DIR"
 export SINGULARITYENV_TRITON_CACHE_DIR="$TRITON_CACHE_DIR"
 export SINGULARITYENV_UNSLOTH_DISABLE_STATISTICS=1
 
-export GRPO_VLLM_SERVER_HOST="$HOST"
-export GRPO_VLLM_SERVER_PORT="$PORT"
+export GRPO_VLLM_SERVER_HOST="$HOST_IP"
+export GRPO_VLLM_SERVER_PORT="$HTTP_PORT"
+export GRPO_VLLM_GROUP_PORT="$GROUP_PORT"
 export GRPO_VLLM_SERVER_TIMEOUT="${GRPO_VLLM_SERVER_TIMEOUT:-300}"
 
 export SINGULARITYENV_GRPO_VLLM_SERVER_HOST="$GRPO_VLLM_SERVER_HOST"
 export SINGULARITYENV_GRPO_VLLM_SERVER_PORT="$GRPO_VLLM_SERVER_PORT"
+export SINGULARITYENV_GRPO_VLLM_GROUP_PORT="$GRPO_VLLM_GROUP_PORT"
 export SINGULARITYENV_GRPO_VLLM_SERVER_TIMEOUT="$GRPO_VLLM_SERVER_TIMEOUT"
 
 export RL_MAX_STEPS_OVERRIDE="${RL_MAX_STEPS_OVERRIDE:-1}"
 export RL_DATASET_LIMIT_OVERRIDE="${RL_DATASET_LIMIT_OVERRIDE:-64}"
-
 export SINGULARITYENV_RL_MAX_STEPS_OVERRIDE="$RL_MAX_STEPS_OVERRIDE"
 export SINGULARITYENV_RL_DATASET_LIMIT_OVERRIDE="$RL_DATASET_LIMIT_OVERRIDE"
 
@@ -109,7 +111,6 @@ singularity exec --nv \
   "$IMAGE" \
   python - <<'PY'
 import importlib.util
-import importlib.metadata as md
 import torch, vllm, trl, transformers
 print("torch", torch.__version__, torch.version.cuda)
 print("vllm", vllm.__version__)
@@ -128,8 +129,8 @@ singularity exec --nv \
   "$IMAGE" \
   /venv/main/bin/trl vllm-serve \
     --model "$MODEL" \
-    --host "$HOST" \
-    --port "$PORT" \
+    --host "$BIND_HOST" \
+    --port "$HTTP_PORT" \
     --gpu_memory_utilization "$SERVER_GPU_UTIL" \
     --dtype "$SERVER_DTYPE" \
     --max_model_len "$SERVER_MAX_MODEL_LEN" \
@@ -143,21 +144,31 @@ singularity exec --nv \
 SERVER_PID=$!
 echo "server_pid=$SERVER_PID"
 
-echo "===== WAIT FOR SERVER PORT ====="
+echo "===== WAIT FOR SERVER HTTP ====="
 python - <<PY
-import socket, time, sys
-host = "$HOST"
-port = int("$PORT")
+import socket, time, sys, urllib.request
+host = "$HOST_IP"
+port = int("$HTTP_PORT")
 deadline = time.time() + 300
+
 while time.time() < deadline:
     try:
         with socket.create_connection((host, port), timeout=2):
-            print(f"server port open: {host}:{port}")
-            sys.exit(0)
+            print(f"tcp open: {host}:{port}")
+            break
     except OSError:
         time.sleep(2)
-print(f"server did not open port: {host}:{port}", file=sys.stderr)
-sys.exit(1)
+else:
+    print(f"server TCP did not open: {host}:{port}", file=sys.stderr)
+    sys.exit(1)
+
+for path in ["/health/", "/get_world_size/"]:
+    url = f"http://{host}:{port}{path}"
+    try:
+        print("GET", url)
+        print(urllib.request.urlopen(url, timeout=10).read().decode()[:500])
+    except Exception as e:
+        print("HTTP check failed", url, repr(e))
 PY
 
 echo "===== START GRPO TRAINER CLIENT ====="
