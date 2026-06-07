@@ -38,6 +38,7 @@ IMAGE="${IMAGE:-$PROJECT_DIR/containers/sandboxes/rl-grpo-v100-vllm085}"
 
 TASK="${TASK:-stack}"                         # stack | qwen3 | train | eval
 MODEL="${MODEL:-${VLLM_SMOKE_MODEL:-/workspace/models/qwen3-4b}}"
+SELECTED_MODEL="${SELECTED_MODEL:-4b-instruct}"
 TRAIN_RUN="${TRAIN_RUN:-${TRAIN_SMOKE_RUN:-cl_length_staged}}"
 EVAL_RUN="${EVAL_RUN:-$TRAIN_RUN}"
 EVAL_INCLUDE_BASE="${EVAL_INCLUDE_BASE:-0}"
@@ -73,6 +74,7 @@ echo "pwd=$PWD"
 echo "project=$PROJECT_DIR"
 echo "image=$IMAGE"
 echo "model=$MODEL"
+echo "selected_model=$SELECTED_MODEL"
 echo "train_run=$TRAIN_RUN"
 echo "eval_run=$EVAL_RUN"
 echo "eval_include_base=$EVAL_INCLUDE_BASE"
@@ -84,6 +86,7 @@ nvidia-smi || true
 # Keep repo importable, but do not expose stale package metadata.
 export PYTHONPATH=/workspace
 export SINGULARITYENV_PYTHONPATH=/workspace
+export SINGULARITYENV_SELECTED_MODEL="$SELECTED_MODEL"
 
 # Disable Unsloth statistics/download probes. Required for offline/local model runs.
 export UNSLOTH_DISABLE_STATISTICS=1
