@@ -110,6 +110,68 @@ def make_reward_func(cfg: PythonRewardConfig):
     return reward_func
 
 
+
+def force_trainable_lora_graph(model):
+    """Make loaded PEFT adapters usable for RL/SFT backward.
+
+    Fresh LoRA goes through FastLanguageModel.get_peft_model(...), which prepares
+    the training graph. Existing adapters loaded via PeftModel.from_pretrained(...)
+    need the same train-mode/input-grad setup explicitly.
+    """
+    try:
+        FastLanguageModel.for_training(model)
+        print("[grpo-server] FastLanguageModel.for_training applied")
+    except Exception as e:
+        print(f"[grpo-server] FastLanguageModel.for_training skipped: {e!r}")
+
+    model.train()
+
+    try:
+        model.config.use_cache = False
+    except Exception:
+        pass
+
+    if hasattr(model, "enable_input_require_grads"):
+        try:
+            model.enable_input_require_grads()
+            print("[grpo-server] enable_input_require_grads applied")
+        except Exception as e:
+            print(f"[grpo-server] enable_input_require_grads failed: {e!r}")
+    else:
+        try:
+            emb = model.get_input_embeddings()
+
+            def make_inputs_require_grad(module, input, output):
+                output.requires_grad_(True)
+
+            emb.register_forward_hook(make_inputs_require_grad)
+            print("[grpo-server] input embedding grad hook registered")
+        except Exception as e:
+            print(f"[grpo-server] input embedding grad hook failed: {e!r}")
+
+    # Be explicit for PEFT adapters. This is harmless for fresh LoRA and important
+    # for adapters loaded from disk.
+    trainable = 0
+    total = 0
+    for name, param in model.named_parameters():
+        total += param.numel()
+        if (
+            "lora_" in name
+            or ".lora_A." in name
+            or ".lora_B." in name
+            or "modules_to_save" in name
+        ):
+            param.requires_grad_(True)
+        if param.requires_grad:
+            trainable += param.numel()
+
+    print(f"[grpo-server] force_trainable_lora_graph: trainable={trainable:,} total={total:,}")
+    if trainable == 0:
+        raise RuntimeError("No trainable parameters after loading/preparing LoRA adapter")
+
+    return model
+
+
 def load_model_tokenizer(
     base_model: str,
     *,
@@ -153,6 +215,8 @@ def load_model_tokenizer(
             random_state=int(lora_cfg.get("random_state", 3407)),
         )
         model = FastLanguageModel.get_peft_model(model, **peft_kwargs)
+
+    model = force_trainable_lora_graph(model)
 
     try:
         model.print_trainable_parameters()
