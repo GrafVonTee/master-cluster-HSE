@@ -9,6 +9,30 @@
 
 set -euo pipefail
 
+
+# Load Singularity/Apptainer inside Slurm job. Login-node PATH and compute-node
+# batch PATH can differ.
+if ! command -v singularity >/dev/null 2>&1 && ! command -v apptainer >/dev/null 2>&1; then
+  if command -v module >/dev/null 2>&1; then
+    module load singularity/3.9.0 2>/dev/null || true
+    module load singularity 2>/dev/null || true
+    module load apptainer 2>/dev/null || true
+  fi
+fi
+
+if command -v singularity >/dev/null 2>&1; then
+  SINGULARITY_CMD="$(command -v singularity)"
+elif command -v apptainer >/dev/null 2>&1; then
+  SINGULARITY_CMD="$(command -v apptainer)"
+else
+  echo "ERROR: neither singularity nor apptainer found in batch environment" >&2
+  echo "PATH=$PATH" >&2
+  module list 2>&1 || true
+  exit 127
+fi
+
+echo "container_runtime=$SINGULARITY_CMD"
+
 cd "${SLURM_SUBMIT_DIR:-$PWD}"
 
 PROJECT_DIR="${PROJECT_DIR:-$PWD}"
@@ -105,7 +129,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "===== PRECHECK ====="
-singularity exec --nv \
+"$SINGULARITY_CMD" exec --nv \
   --bind "$PROJECT_DIR:/workspace" \
   --pwd /workspace \
   "$IMAGE" \
@@ -123,7 +147,7 @@ if torch.cuda.is_available():
 PY
 
 echo "===== START TRL vLLM SERVER ====="
-singularity exec --nv \
+"$SINGULARITY_CMD" exec --nv \
   --bind "$PROJECT_DIR:/workspace" \
   --pwd /workspace \
   "$IMAGE" \
@@ -172,7 +196,7 @@ for path in ["/health/", "/get_world_size/"]:
 PY
 
 echo "===== START GRPO TRAINER CLIENT ====="
-singularity exec --nv \
+"$SINGULARITY_CMD" exec --nv \
   --bind "$PROJECT_DIR:/workspace" \
   --pwd /workspace \
   "$IMAGE" \
