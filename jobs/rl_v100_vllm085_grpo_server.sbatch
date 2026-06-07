@@ -1,22 +1,22 @@
-#!/usr/bin/env bash
+#!/bin/bash
 #SBATCH --job-name=grpo-server-v100
-#SBATCH --partition=test
-#SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=2
-#SBATCH --time=00:30:00
 #SBATCH --output=logs/slurm/grpo-server-v100-%j.out
 #SBATCH --error=logs/slurm/grpo-server-v100-%j.err
+#SBATCH --time=00:30:00
+#SBATCH --partition=test
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --gpus=1
+#SBATCH --cpus-per-task=2
 
 set -euo pipefail
 
-cd "${SLURM_SUBMIT_DIR:-$PWD}"
-
-PROJECT_DIR="${PROJECT_DIR:-$PWD}"
-IMAGE="${IMAGE:-$PROJECT_DIR/containers/sandboxes/rl-grpo-v100-vllm085}"
+PROJECT_DIR="${PROJECT_DIR:-$HOME/master-cluster-HSE}"
+IMAGE="${RL_IMAGE:-$PROJECT_DIR/containers/sandboxes/rl-grpo-v100-vllm085}"
 
 MODEL="${MODEL:-/workspace/models/qwen3-4b-instruct-2507}"
-RUN_NAME="${GRPO_RUN_NAME:-grpo_pythoncodes_server_smoke}"
 CONFIG="${GRPO_CONFIG:-configs/rl/grpo_pythoncodes.yaml}"
+RUN_NAME="${GRPO_RUN_NAME:-grpo_pythoncodes_server_smoke}"
 
 HTTP_PORT="${GRPO_VLLM_SERVER_PORT:-8000}"
 GROUP_PORT="${GRPO_VLLM_GROUP_PORT:-$((51216 + SLURM_JOB_ID % 10000))}"
@@ -30,19 +30,30 @@ SERVER_ENFORCE_EAGER="${SERVER_ENFORCE_EAGER:-true}"
 RL_MAX_STEPS_OVERRIDE="${RL_MAX_STEPS_OVERRIDE:-1}"
 RL_DATASET_LIMIT_OVERRIDE="${RL_DATASET_LIMIT_OVERRIDE:-64}"
 
-mkdir -p logs/slurm outputs/rl \
+cd "$PROJECT_DIR"
+
+module purge
+module load singularity/3.9.0
+
+export SINGULARITY_CACHEDIR="$PROJECT_DIR/.singularity/cache"
+export SINGULARITY_TMPDIR="$PROJECT_DIR/.singularity/tmp/${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID:-0}"
+
+mkdir -p "$SINGULARITY_CACHEDIR" "$SINGULARITY_TMPDIR" \
+  logs/slurm outputs/rl models datasets .home \
   .cache/huggingface/datasets \
   .cache/vllm \
   .cache/torch \
   .cache/torch_extensions \
+  .cache/torchinductor \
   .cache/triton
 
+trap 'rm -rf "$SINGULARITY_TMPDIR"' EXIT
+
 echo "===== JOB INFO ====="
-echo "job=${SLURM_JOB_ID:-none}"
-echo "node=$(hostname)"
-echo "project=$PROJECT_DIR"
+echo "job=${SLURM_JOB_ID:-none} node=${SLURMD_NODENAME:-unknown} host=$(hostname)"
 echo "image=$IMAGE"
 echo "model=$MODEL"
+echo "config=$CONFIG"
 echo "run_name=$RUN_NAME"
 echo "http_port=$HTTP_PORT"
 echo "group_port=$GROUP_PORT"
@@ -50,31 +61,14 @@ echo "server_gpu_util=$SERVER_GPU_UTIL"
 echo "server_max_model_len=$SERVER_MAX_MODEL_LEN"
 echo "server_dtype=$SERVER_DTYPE"
 echo "server_enforce_eager=$SERVER_ENFORCE_EAGER"
-
-test -d "$IMAGE" || { echo "ERROR: sandbox not found: $IMAGE" >&2; exit 2; }
-
-if ! command -v singularity >/dev/null 2>&1 && ! command -v apptainer >/dev/null 2>&1; then
-  if command -v module >/dev/null 2>&1; then
-    module load singularity/3.9.0 2>/dev/null || true
-    module load singularity 2>/dev/null || true
-    module load apptainer 2>/dev/null || true
-  fi
-fi
-
-if command -v singularity >/dev/null 2>&1; then
-  SINGULARITY_CMD="$(command -v singularity)"
-elif command -v apptainer >/dev/null 2>&1; then
-  SINGULARITY_CMD="$(command -v apptainer)"
-else
-  echo "ERROR: neither singularity nor apptainer found" >&2
-  echo "PATH=$PATH" >&2
-  module list 2>&1 || true
-  exit 127
-fi
-
-echo "container_runtime=$SINGULARITY_CMD"
+echo "SINGULARITY_CACHEDIR=$SINGULARITY_CACHEDIR"
+echo "SINGULARITY_TMPDIR=$SINGULARITY_TMPDIR"
 
 nvidia-smi || true
+
+test -d "$IMAGE" || { echo "Missing sandbox: $IMAGE" >&2; exit 1; }
+test -f "$CONFIG" || { echo "Missing config: $CONFIG" >&2; exit 1; }
+test -d "${MODEL#/workspace/$PROJECT_DIR/}" || true
 
 INNER_SCRIPT="outputs/rl/run_grpo_server_${SLURM_JOB_ID}.sh"
 
@@ -85,39 +79,21 @@ set -euo pipefail
 echo "===== INSIDE CONTAINER ====="
 echo "host=$(hostname)"
 echo "MODEL=$MODEL"
+echo "CONFIG=$CONFIG"
 echo "RUN_NAME=$RUN_NAME"
 echo "HTTP_PORT=$HTTP_PORT"
 echo "GROUP_PORT=$GROUP_PORT"
-echo "SERVER_DTYPE=$SERVER_DTYPE"
-echo "SERVER_ENFORCE_EAGER=$SERVER_ENFORCE_EAGER"
 
-export PYTHONPATH=/workspace
+cd /workspace
 
-export HF_HOME=/workspace/.cache/huggingface
-export TRANSFORMERS_CACHE=/workspace/.cache/huggingface
-export HF_DATASETS_CACHE=/workspace/.cache/huggingface/datasets
-export VLLM_CACHE_ROOT=/workspace/.cache/vllm
-export TORCH_HOME=/workspace/.cache/torch
-export TORCH_EXTENSIONS_DIR=/workspace/.cache/torch_extensions
-export TRITON_CACHE_DIR=/workspace/.cache/triton
-
-export HF_HUB_OFFLINE=1
-export TRANSFORMERS_OFFLINE=1
-export HF_DATASETS_OFFLINE=1
-export UNSLOTH_DISABLE_STATISTICS=1
-
-export GRPO_VLLM_SERVER_HOST=127.0.0.1
-export GRPO_VLLM_SERVER_PORT="$HTTP_PORT"
-export GRPO_VLLM_GROUP_PORT="$GROUP_PORT"
-export GRPO_VLLM_SERVER_TIMEOUT=300
-
-export RL_MAX_STEPS_OVERRIDE="$RL_MAX_STEPS_OVERRIDE"
-export RL_DATASET_LIMIT_OVERRIDE="$RL_DATASET_LIMIT_OVERRIDE"
-export GRPO_RUN_NAME="$RUN_NAME"
-
-if [[ -n "${RL_INIT_ADAPTER:-}" ]]; then
-  export RL_INIT_ADAPTER="$RL_INIT_ADAPTER"
-fi
+cleanup() {
+  if [[ -n "${SERVER_PID:-}" ]]; then
+    echo "===== STOP vLLM SERVER pid=$SERVER_PID ====="
+    kill "$SERVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
 
 echo "===== PRECHECK ====="
 python - <<'PY'
@@ -132,15 +108,6 @@ print("cuda", torch.cuda.is_available())
 if torch.cuda.is_available():
     print("gpu", torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0))
 PY
-
-cleanup() {
-  if [[ -n "${SERVER_PID:-}" ]]; then
-    echo "===== STOP vLLM SERVER pid=$SERVER_PID ====="
-    kill "$SERVER_PID" 2>/dev/null || true
-    wait "$SERVER_PID" 2>/dev/null || true
-  fi
-}
-trap cleanup EXIT
 
 echo "===== START TRL vLLM SERVER ====="
 /venv/main/bin/trl vllm-serve \
@@ -163,6 +130,7 @@ echo "server_pid=$SERVER_PID"
 echo "===== WAIT FOR SERVER ====="
 python - <<PY
 import socket, time, sys, urllib.request
+
 host = "127.0.0.1"
 port = int("$HTTP_PORT")
 deadline = time.time() + 300
@@ -207,27 +175,44 @@ INNER
 
 chmod +x "$INNER_SCRIPT"
 
-echo "===== RUN SINGLE SINGULARITY SESSION THROUGH SRUN ====="
-export SINGULARITYENV_MODEL="$MODEL"
-export SINGULARITYENV_RUN_NAME="$RUN_NAME"
-export SINGULARITYENV_CONFIG="$CONFIG"
-export SINGULARITYENV_HTTP_PORT="$HTTP_PORT"
-export SINGULARITYENV_GROUP_PORT="$GROUP_PORT"
-export SINGULARITYENV_SERVER_GPU_UTIL="$SERVER_GPU_UTIL"
-export SINGULARITYENV_SERVER_MAX_MODEL_LEN="$SERVER_MAX_MODEL_LEN"
-export SINGULARITYENV_SERVER_DTYPE="$SERVER_DTYPE"
-export SINGULARITYENV_SERVER_MODEL_IMPL="$SERVER_MODEL_IMPL"
-export SINGULARITYENV_SERVER_ENFORCE_EAGER="$SERVER_ENFORCE_EAGER"
-export SINGULARITYENV_RL_MAX_STEPS_OVERRIDE="$RL_MAX_STEPS_OVERRIDE"
-export SINGULARITYENV_RL_DATASET_LIMIT_OVERRIDE="$RL_DATASET_LIMIT_OVERRIDE"
-export SINGULARITYENV_SLURM_JOB_ID="${SLURM_JOB_ID:-manual}"
+echo "===== RUN SINGLE SINGULARITY SESSION THROUGH OLD WORKING PATTERN ====="
 
-if [[ -n "${RL_INIT_ADAPTER:-}" ]]; then
-  export SINGULARITYENV_RL_INIT_ADAPTER="$RL_INIT_ADAPTER"
-fi
-
-srun "$SINGULARITY_CMD" exec --nv \
+srun singularity exec --nv --cleanenv \
   --bind "$PROJECT_DIR:/workspace" \
-  --pwd /workspace \
+  --env PROJECT_DIR=/workspace \
+  --env PYTHONPATH=/workspace \
+  --env HOME=/workspace/.home \
+  --env HF_HOME=/workspace/.cache/huggingface \
+  --env HF_DATASETS_CACHE=/workspace/.cache/huggingface/datasets \
+  --env TRANSFORMERS_CACHE=/workspace/.cache/huggingface \
+  --env VLLM_CACHE_ROOT=/workspace/.cache/vllm \
+  --env TORCH_HOME=/workspace/.cache/torch \
+  --env TORCH_EXTENSIONS_DIR=/workspace/.cache/torch_extensions \
+  --env TORCHINDUCTOR_CACHE_DIR=/workspace/.cache/torchinductor \
+  --env TRITON_CACHE_DIR=/workspace/.cache/triton \
+  --env HF_HUB_OFFLINE=1 \
+  --env TRANSFORMERS_OFFLINE=1 \
+  --env HF_DATASETS_OFFLINE=1 \
+  --env TOKENIZERS_PARALLELISM=false \
+  --env UNSLOTH_DISABLE_STATISTICS=1 \
+  --env MODEL="$MODEL" \
+  --env CONFIG="$CONFIG" \
+  --env RUN_NAME="$RUN_NAME" \
+  --env HTTP_PORT="$HTTP_PORT" \
+  --env GROUP_PORT="$GROUP_PORT" \
+  --env GRPO_VLLM_SERVER_HOST=127.0.0.1 \
+  --env GRPO_VLLM_SERVER_PORT="$HTTP_PORT" \
+  --env GRPO_VLLM_GROUP_PORT="$GROUP_PORT" \
+  --env GRPO_VLLM_SERVER_TIMEOUT=300 \
+  --env SERVER_GPU_UTIL="$SERVER_GPU_UTIL" \
+  --env SERVER_MAX_MODEL_LEN="$SERVER_MAX_MODEL_LEN" \
+  --env SERVER_DTYPE="$SERVER_DTYPE" \
+  --env SERVER_MODEL_IMPL="$SERVER_MODEL_IMPL" \
+  --env SERVER_ENFORCE_EAGER="$SERVER_ENFORCE_EAGER" \
+  --env RL_MAX_STEPS_OVERRIDE="$RL_MAX_STEPS_OVERRIDE" \
+  --env RL_DATASET_LIMIT_OVERRIDE="$RL_DATASET_LIMIT_OVERRIDE" \
+  --env RL_INIT_ADAPTER="${RL_INIT_ADAPTER:-}" \
+  --env SLURM_JOB_ID="${SLURM_JOB_ID:-manual}" \
+  --env PYTHONUNBUFFERED=1 \
   "$IMAGE" \
   bash "/workspace/$INNER_SCRIPT"
