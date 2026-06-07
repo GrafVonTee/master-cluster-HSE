@@ -264,8 +264,8 @@ def main() -> int:
         vllm_mode="server",
         vllm_server_host=os.environ.get("GRPO_VLLM_SERVER_HOST", "127.0.0.1"),
         vllm_server_port=env_int("GRPO_VLLM_SERVER_PORT", 8000),
-        vllm_server_timeout=env_float("GRPO_VLLM_SERVER_TIMEOUT", 300.0),
         vllm_group_port=env_int("GRPO_VLLM_GROUP_PORT", 51216),
+        vllm_server_timeout=env_float("GRPO_VLLM_SERVER_TIMEOUT", 300.0),
     )
 
     training_kwargs = filter_dataclass_kwargs(GRPOConfig, training_kwargs)
