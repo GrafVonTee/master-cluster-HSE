@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=rl-v100-vllm085
-#SBATCH --partition=test
+#SBATCH --partition=rocky
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=2
 #SBATCH --time=00:30:00
@@ -8,6 +8,28 @@
 #SBATCH --error=logs/slurm/rl-v100-vllm085-%x-%j.err
 
 set -euo pipefail
+
+# Rocky Linux 9 container runtime setup.
+# The old CentOS module name can be absent or exposed as legacy; prefer whichever runtime exists.
+if command -v module >/dev/null 2>&1; then
+  module load singularity/3.9.0 2>/dev/null || \
+  module load singularity 2>/dev/null || \
+  module load apptainer 2>/dev/null || true
+fi
+
+if command -v singularity >/dev/null 2>&1; then
+  CONTAINER_RUNTIME="$(command -v singularity)"
+elif command -v apptainer >/dev/null 2>&1; then
+  CONTAINER_RUNTIME="$(command -v apptainer)"
+else
+  echo "ERROR: neither singularity nor apptainer found on Rocky node" >&2
+  echo "PATH=$PATH" >&2
+  module list 2>&1 || true
+  exit 127
+fi
+
+echo "container_runtime=$CONTAINER_RUNTIME"
+
 
 cd "${SLURM_SUBMIT_DIR:-$PWD}"
 
@@ -125,7 +147,7 @@ export SINGULARITYENV_EVAL_RUN="$EVAL_RUN"
 export SINGULARITYENV_EVAL_INCLUDE_BASE="$EVAL_INCLUDE_BASE"
 
 run_in_container() {
-  srun singularity exec --nv \
+  srun "$CONTAINER_RUNTIME" exec --nv \
     --bind "$PROJECT_DIR:/workspace" \
     --pwd /workspace \
     "$IMAGE" \

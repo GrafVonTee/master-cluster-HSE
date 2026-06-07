@@ -6,6 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --gpus=1
 #SBATCH --cpus-per-task=4
+#SBATCH --partition=rocky
 
 set -e
 
@@ -15,7 +16,28 @@ IMAGE="$PROJECT_DIR/containers/vllm-openai-0.8.5-sandbox"
 cd "$PROJECT_DIR"
 
 module purge
-module load singularity/3.9.0
+
+# Rocky Linux 9 container runtime setup.
+# The old CentOS module name can be absent or exposed as legacy; prefer whichever runtime exists.
+if command -v module >/dev/null 2>&1; then
+  module load singularity/3.9.0 2>/dev/null || \
+  module load singularity 2>/dev/null || \
+  module load apptainer 2>/dev/null || true
+fi
+
+if command -v singularity >/dev/null 2>&1; then
+  CONTAINER_RUNTIME="$(command -v singularity)"
+elif command -v apptainer >/dev/null 2>&1; then
+  CONTAINER_RUNTIME="$(command -v apptainer)"
+else
+  echo "ERROR: neither singularity nor apptainer found on Rocky node" >&2
+  echo "PATH=$PATH" >&2
+  module list 2>&1 || true
+  exit 127
+fi
+
+echo "container_runtime=$CONTAINER_RUNTIME"
+
 
 export HF_HOME="$PROJECT_DIR/.cache/huggingface"
 export VLLM_CACHE_ROOT="$PROJECT_DIR/.cache/vllm"
@@ -36,7 +58,7 @@ echo
 
 echo "===== RUN CONTAINER SESSION ====="
 
-singularity exec --nv \
+"$CONTAINER_RUNTIME" exec --nv \
   --bind "$PROJECT_DIR:$PROJECT_DIR" \
   --env PROJECT_DIR="$PROJECT_DIR" \
   --env HF_HOME="$HF_HOME" \

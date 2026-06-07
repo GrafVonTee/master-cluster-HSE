@@ -7,14 +7,16 @@
 #SBATCH --ntasks=1
 #SBATCH --gpus=1
 #SBATCH --cpus-per-task=1
-#SBATCH --partition=test
+#SBATCH --partition=rocky
 
 set -euo pipefail
 
 # Avoid small compute-node /tmp. Some Singularity installations extract SIF
 # into a temporary sandbox, which can easily exceed /tmp/job-* space.
 export SINGULARITY_CACHEDIR="$PWD/.singularity/cache"
+export APPTAINER_CACHEDIR="$SINGULARITY_CACHEDIR"
 export SINGULARITY_TMPDIR="$PWD/.singularity/tmp/${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID:-0}"
+export APPTAINER_TMPDIR="$SINGULARITY_TMPDIR"
 mkdir -p "$SINGULARITY_CACHEDIR" "$SINGULARITY_TMPDIR"
 trap 'rm -rf "$SINGULARITY_TMPDIR"' EXIT
 
@@ -25,7 +27,28 @@ IMAGE="$PROJECT_DIR/containers/current-sandbox"
 cd "$PROJECT_DIR"
 
 module purge
-module load singularity/3.9.0
+
+# Rocky Linux 9 container runtime setup.
+# The old CentOS module name can be absent or exposed as legacy; prefer whichever runtime exists.
+if command -v module >/dev/null 2>&1; then
+  module load singularity/3.9.0 2>/dev/null || \
+  module load singularity 2>/dev/null || \
+  module load apptainer 2>/dev/null || true
+fi
+
+if command -v singularity >/dev/null 2>&1; then
+  CONTAINER_RUNTIME="$(command -v singularity)"
+elif command -v apptainer >/dev/null 2>&1; then
+  CONTAINER_RUNTIME="$(command -v apptainer)"
+else
+  echo "ERROR: neither singularity nor apptainer found on Rocky node" >&2
+  echo "PATH=$PATH" >&2
+  module list 2>&1 || true
+  exit 127
+fi
+
+echo "container_runtime=$CONTAINER_RUNTIME"
+
 
 export PROJECT_DIR="$PROJECT_DIR"
 export PYTHONPATH="$PROJECT_DIR:${PYTHONPATH:-}"
@@ -56,7 +79,7 @@ echo "PYTHONPATH: $PYTHONPATH"
 echo "===== MODULES ====="
 module list || true
 echo "singularity: $(which singularity)"
-singularity --version || true
+"$CONTAINER_RUNTIME" --version || true
 
 echo "===== PROJECT TREE CHECK ====="
 ls -lah "$PROJECT_DIR"
@@ -94,7 +117,7 @@ echo "===== HOST GPU ====="
 nvidia-smi || true
 
 echo "===== CONTAINER BASIC CHECK ====="
-singularity exec --nv \
+"$CONTAINER_RUNTIME" exec --nv \
   --bind "$PROJECT_DIR:$PROJECT_DIR" \
   --env PROJECT_DIR="$PROJECT_DIR" \
   --env PYTHONPATH="$PYTHONPATH" \
@@ -106,7 +129,7 @@ singularity exec --nv \
   bash -lc "python3 --version && which python3 && nvidia-smi || true"
 
 echo "===== CONTAINER PYTHON CHECK ====="
-singularity exec --nv \
+"$CONTAINER_RUNTIME" exec --nv \
   --bind "$PROJECT_DIR:$PROJECT_DIR" \
   --env PROJECT_DIR="$PROJECT_DIR" \
   --env PYTHONPATH="$PYTHONPATH" \

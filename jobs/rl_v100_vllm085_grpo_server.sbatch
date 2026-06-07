@@ -3,7 +3,7 @@
 #SBATCH --output=logs/slurm/grpo-server-v100-%j.out
 #SBATCH --error=logs/slurm/grpo-server-v100-%j.err
 #SBATCH --time=00:30:00
-#SBATCH --partition=test
+#SBATCH --partition=rocky
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gpus=1
@@ -33,10 +33,33 @@ RL_DATASET_LIMIT_OVERRIDE="${RL_DATASET_LIMIT_OVERRIDE:-64}"
 cd "$PROJECT_DIR"
 
 module purge
-module load singularity/3.9.0
+
+# Rocky Linux 9 container runtime setup.
+# The old CentOS module name can be absent or exposed as legacy; prefer whichever runtime exists.
+if command -v module >/dev/null 2>&1; then
+  module load singularity/3.9.0 2>/dev/null || \
+  module load singularity 2>/dev/null || \
+  module load apptainer 2>/dev/null || true
+fi
+
+if command -v singularity >/dev/null 2>&1; then
+  CONTAINER_RUNTIME="$(command -v singularity)"
+elif command -v apptainer >/dev/null 2>&1; then
+  CONTAINER_RUNTIME="$(command -v apptainer)"
+else
+  echo "ERROR: neither singularity nor apptainer found on Rocky node" >&2
+  echo "PATH=$PATH" >&2
+  module list 2>&1 || true
+  exit 127
+fi
+
+echo "container_runtime=$CONTAINER_RUNTIME"
+
 
 export SINGULARITY_CACHEDIR="$PROJECT_DIR/.singularity/cache"
+export APPTAINER_CACHEDIR="$SINGULARITY_CACHEDIR"
 export SINGULARITY_TMPDIR="$PROJECT_DIR/.singularity/tmp/${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID:-0}"
+export APPTAINER_TMPDIR="$SINGULARITY_TMPDIR"
 
 mkdir -p "$SINGULARITY_CACHEDIR" "$SINGULARITY_TMPDIR" \
   logs/slurm outputs/rl models datasets .home \
@@ -177,7 +200,7 @@ chmod +x "$INNER_SCRIPT"
 
 echo "===== RUN SINGLE SINGULARITY SESSION THROUGH OLD WORKING PATTERN ====="
 
-srun singularity exec --nv --cleanenv \
+srun "$CONTAINER_RUNTIME" exec --nv --cleanenv \
   --bind "$PROJECT_DIR:/workspace" \
   --env PROJECT_DIR=/workspace \
   --env PYTHONPATH=/workspace \
