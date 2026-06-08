@@ -49,7 +49,7 @@ submit_train_matrix() {
   fi
 
   sbatch --parsable \
-    "${args[@]}" \
+    ${args[@]+"${args[@]}"} \
     --array="1-${#runs[@]}%${throttle}" \
     --export=ALL,MATRIX="$matrix",SELECTED_MODEL="$selected_model",CONFIG=configs/train/lora_pythoncodes_cl.yaml \
     jobs/python_train_matrix_rocky.sbatch
@@ -78,7 +78,7 @@ submit_eval_matrix() {
 
   local jid_eval
   jid_eval=$(sbatch --parsable \
-    "${args[@]}" \
+    ${args[@]+"${args[@]}"} \
     --array="1-${#exps[@]}%${throttle}" \
     --export=ALL,MATRIX="$matrix",PARTS_ROOT="$parts_root",SELECTED_MODEL="$selected_model",EVAL_BENCHMARKS=mbpp,humaneval \
     jobs/python_eval_matrix_rocky.sbatch)
@@ -111,7 +111,7 @@ submit_grpo() {
   fi
 
   sbatch --parsable \
-    "${args[@]}" \
+    ${args[@]+"${args[@]}"} \
     --export="$export_env" \
     "$GRPO_JOB"
 }
