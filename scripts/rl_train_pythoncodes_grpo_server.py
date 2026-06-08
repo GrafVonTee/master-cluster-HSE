@@ -273,10 +273,12 @@ def main() -> int:
 
     output_root = Path(str(resolve_workspace_path(cfg.get("output_root", "/workspace/outputs/rl"))))
     output_dir = output_root / run_name
+
+    base_slug = Path(str(base_model)).name.rstrip("/")
     adapter_output_dir = Path(
         os.environ.get(
             "GRPO_ADAPTER_OUTPUT_DIR",
-            str(resolve_workspace_path(f"/workspace/models/qwen3-4b-instruct-2507-sft-{run_name}")),
+            str(resolve_workspace_path(f"/workspace/models/{base_slug}-sft-{run_name}")),
         )
     )
 

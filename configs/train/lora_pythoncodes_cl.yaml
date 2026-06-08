@@ -53,7 +53,7 @@ training:
   save_steps: 100
   save_total_limit: 2
   report_to: tensorboard
-  dataloader_num_workers: 4
+  dataloader_num_workers: 2
   dataloader_pin_memory: true
   max_grad_norm: 1.0
   seed: 42

@@ -2,12 +2,12 @@
 #SBATCH --job-name=grpo-server-2gpu-normal
 #SBATCH --output=logs/slurm/grpo-server-2gpu-normal-%j.out
 #SBATCH --error=logs/slurm/grpo-server-2gpu-normal-%j.err
-#SBATCH --time=00:30:00
+#SBATCH --time=08:00:00
 #SBATCH --partition=rocky
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gpus=2
-#SBATCH --cpus-per-task=2
+#SBATCH --cpus-per-task=4
 
 set -euo pipefail
 
@@ -29,8 +29,8 @@ SERVER_DTYPE="${SERVER_DTYPE:-float16}"
 SERVER_MODEL_IMPL="${SERVER_MODEL_IMPL:-vllm}"
 SERVER_ENFORCE_EAGER="${SERVER_ENFORCE_EAGER:-true}"
 
-RL_MAX_STEPS_OVERRIDE="${RL_MAX_STEPS_OVERRIDE:-1}"
-RL_DATASET_LIMIT_OVERRIDE="${RL_DATASET_LIMIT_OVERRIDE:-64}"
+RL_MAX_STEPS_OVERRIDE="${RL_MAX_STEPS_OVERRIDE:-}"
+RL_DATASET_LIMIT_OVERRIDE="${RL_DATASET_LIMIT_OVERRIDE:-}"
 
 cd "$PROJECT_DIR"
 
@@ -137,6 +137,10 @@ export GRPO_VLLM_SERVER_TIMEOUT=300
 export RL_MAX_STEPS_OVERRIDE="$RL_MAX_STEPS_OVERRIDE"
 export RL_DATASET_LIMIT_OVERRIDE="$RL_DATASET_LIMIT_OVERRIDE"
 export GRPO_RUN_NAME="$RUN_NAME"
+
+if [[ -n "${GRPO_ADAPTER_OUTPUT_DIR:-}" ]]; then
+  export SINGULARITYENV_GRPO_ADAPTER_OUTPUT_DIR="$GRPO_ADAPTER_OUTPUT_DIR"
+fi
 
 if [[ -n "${RL_INIT_ADAPTER:-}" ]]; then
   export RL_INIT_ADAPTER="$RL_INIT_ADAPTER"
