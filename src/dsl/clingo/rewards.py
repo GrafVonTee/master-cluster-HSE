@@ -26,7 +26,6 @@ def extract_asp_code(text: Any) -> str:
     if fence:
         s = fence.group(1).strip()
 
-    # Remove common chatty prefixes.
     lines = []
     for line in s.splitlines():
         stripped = line.strip()
@@ -37,13 +36,44 @@ def extract_asp_code(text: Any) -> str:
     return "\n".join(lines).strip()
 
 
-def score_clingo_completion(completion: Any, task: dict[str, Any], cfg: ClingoRewardConfig | None = None) -> float:
-    cfg = cfg or ClingoRewardConfig()
+def _score_oracle_tests(code: str, task: dict[str, Any], cfg: ClingoRewardConfig) -> float:
+    facts = str(task.get("facts", "")).strip()
+    oracle_tests = task.get("oracle_tests") or []
 
-    code = extract_asp_code(completion)
-    if len(code) < cfg.min_chars or len(code) > cfg.max_chars:
+    if not oracle_tests:
         return cfg.error_reward
 
+    passed = 0
+    total = 0
+
+    for test in oracle_tests:
+        total += 1
+        test_program = str(test.get("program", "")).strip()
+        expect = str(test.get("expect", "sat")).strip().lower()
+
+        program = facts + "\n\n" + code + "\n\n" + test_program
+        result = solve_clingo(program, timeout=cfg.timeout, max_models=cfg.max_models)
+
+        if not result.ok:
+            continue
+
+        if expect in {"sat", "satisfiable"}:
+            ok = result.satisfiable
+        elif expect in {"unsat", "unsatisfiable"}:
+            ok = result.unsatisfiable
+        else:
+            ok = False
+
+        if ok:
+            passed += 1
+
+    if total <= 0 or passed <= 0:
+        return cfg.error_reward
+
+    return float(passed) / float(total)
+
+
+def _score_expected_atoms(code: str, task: dict[str, Any], cfg: ClingoRewardConfig) -> float:
     facts = str(task.get("facts", "")).strip()
     expected_satisfiable = bool(task.get("expected_satisfiable", True))
     expected_atoms = [str(x) for x in task.get("expected_atoms", [])]
@@ -61,12 +91,11 @@ def score_clingo_completion(completion: Any, task: dict[str, Any], cfg: ClingoRe
     if not expected_satisfiable:
         return 1.0 if result.unsatisfiable else cfg.error_reward
 
-    if not result.atoms:
-        return cfg.error_reward
-
-    checks: list[bool] = []
+    if not expected_atoms and not forbidden_atoms:
+        return 1.0 if result.satisfiable else cfg.error_reward
 
     atom_set = set(result.atoms)
+    checks: list[bool] = []
 
     for atom in expected_atoms:
         checks.append(atom in atom_set)
@@ -75,13 +104,28 @@ def score_clingo_completion(completion: Any, task: dict[str, Any], cfg: ClingoRe
         checks.append(atom not in atom_set)
 
     if not checks:
-        return 1.0 if result.satisfiable else cfg.error_reward
+        return cfg.error_reward
 
     passed = sum(1 for x in checks if x)
-    if passed == 0:
+
+    if passed <= 0:
         return cfg.error_reward
 
     return float(passed) / float(len(checks))
+
+
+def score_clingo_completion(completion: Any, task: dict[str, Any], cfg: ClingoRewardConfig | None = None) -> float:
+    cfg = cfg or ClingoRewardConfig()
+
+    code = extract_asp_code(completion)
+    if len(code) < cfg.min_chars or len(code) > cfg.max_chars:
+        return cfg.error_reward
+
+    oracle_tests = task.get("oracle_tests") or []
+    if oracle_tests:
+        return _score_oracle_tests(code, task, cfg)
+
+    return _score_expected_atoms(code, task, cfg)
 
 
 def make_clingo_reward(config: ClingoRewardConfig):

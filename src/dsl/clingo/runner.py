@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from multiprocessing import Process, Queue
 from typing import Any
+import contextlib
+import io
 
 import clingo
 
@@ -20,22 +22,24 @@ class ClingoSolveResult:
 
 def _solve_worker(program: str, max_models: int, queue: Queue) -> None:
     try:
-        ctl = clingo.Control(["--warn=none"])
-        ctl.add("base", [], program)
-        ctl.ground([("base", [])])
+        stderr_buf = io.StringIO()
+        with contextlib.redirect_stderr(stderr_buf):
+            ctl = clingo.Control(["--warn=none"])
+            ctl.add("base", [], program)
+            ctl.ground([("base", [])])
 
-        models: list[list[str]] = []
-        with ctl.solve(yield_=True) as handle:
-            for model in handle:
-                shown = model.symbols(shown=True)
-                if shown:
-                    atoms = sorted(str(s) for s in shown)
-                else:
-                    atoms = sorted(str(s) for s in model.symbols(atoms=True))
-                models.append(atoms)
-                if len(models) >= max_models:
-                    break
-            result = handle.get()
+            models: list[list[str]] = []
+            with ctl.solve(yield_=True) as handle:
+                for model in handle:
+                    shown = model.symbols(shown=True)
+                    if shown:
+                        atoms = sorted(str(s) for s in shown)
+                    else:
+                        atoms = sorted(str(s) for s in model.symbols(atoms=True))
+                    models.append(atoms)
+                    if len(models) >= max_models:
+                        break
+                result = handle.get()
 
         atom_union = sorted({a for m in models for a in m})
         queue.put(
