@@ -313,6 +313,8 @@ def main() -> int:
         output_dir=str(output_dir),
         max_steps=max_steps,
         learning_rate=float(train_cfg.get("learning_rate", 5e-6)),
+        lr_scheduler_type=str(train_cfg.get("lr_scheduler_type", "linear")),
+        warmup_ratio=float(train_cfg.get("warmup_ratio", 0.0)),
         per_device_train_batch_size=int(train_cfg.get("per_device_train_batch_size", 2)),
         gradient_accumulation_steps=int(train_cfg.get("gradient_accumulation_steps", 1)),
         num_generations=int(train_cfg.get("num_generations", 2)),
