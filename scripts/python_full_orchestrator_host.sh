@@ -80,7 +80,7 @@ submit_eval_matrix() {
   jid_eval=$(sbatch --parsable \
     ${args[@]+"${args[@]}"} \
     --array="1-${#exps[@]}%${throttle}" \
-    --export=ALL,MATRIX="$matrix",PARTS_ROOT="$parts_root",SELECTED_MODEL="$selected_model",EVAL_BENCHMARKS=mbpp,humaneval \
+    --export=ALL,MATRIX="$matrix",PARTS_ROOT="$parts_root",SELECTED_MODEL="$selected_model",EVAL_BENCHMARKS=mbpp+humaneval \
     jobs/python_eval_matrix_rocky.sbatch)
 
   local jid_merge
