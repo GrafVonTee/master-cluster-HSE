@@ -294,6 +294,7 @@ echo "===== RUN SINGLE SINGULARITY SESSION THROUGH OLD WORKING PATTERN ====="
 srun "$CONTAINER_RUNTIME" exec --nv --cleanenv \
   --bind "$PROJECT_DIR:/workspace" \
   --env PROJECT_DIR=/workspace \
+  --env SLURM_JOB_ID="${SLURM_JOB_ID:-0}" \
   --env PYTHONPATH=/workspace \
   --env HOME=/workspace/.home \
   --env HF_HOME=/workspace/.cache/huggingface \
