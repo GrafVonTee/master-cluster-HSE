@@ -18,7 +18,10 @@ MODEL="${MODEL:-/workspace/models/qwen3-4b-instruct-2507}"
 CONFIG="${GRPO_CONFIG:-configs/rl/grpo_pythoncodes.yaml}"
 RUN_NAME="${GRPO_RUN_NAME:-grpo_pythoncodes_server_2gpu_smoke}"
 
-HTTP_PORT="${GRPO_VLLM_SERVER_PORT:-8000}"
+# Do not default to 8000: the same node may have a stale/parallel process.
+HTTP_PORT="${GRPO_VLLM_SERVER_PORT:-$((18000 + ${SLURM_JOB_ID:-0} % 20000))}"
+GROUP_PORT="${GRPO_VLLM_GROUP_PORT:-$((52000 + ${SLURM_JOB_ID:-0} % 10000))}"
+SERVER_TIMEOUT="${GRPO_VLLM_SERVER_TIMEOUT:-900}"
 
 SERVER_GPU="${SERVER_GPU:-0}"
 TRAIN_GPU="${TRAIN_GPU:-1}"
@@ -31,13 +34,13 @@ SERVER_ENFORCE_EAGER="${SERVER_ENFORCE_EAGER:-true}"
 
 RL_MAX_STEPS_OVERRIDE="${RL_MAX_STEPS_OVERRIDE:-}"
 RL_DATASET_LIMIT_OVERRIDE="${RL_DATASET_LIMIT_OVERRIDE:-}"
+RL_INIT_ADAPTER="${RL_INIT_ADAPTER:-}"
+GRPO_ADAPTER_OUTPUT_DIR="${GRPO_ADAPTER_OUTPUT_DIR:-}"
 
 cd "$PROJECT_DIR"
 
 module purge
 
-# Rocky Linux 9 container runtime setup.
-# The old CentOS module name can be absent or exposed as legacy; prefer whichever runtime exists.
 if command -v module >/dev/null 2>&1; then
   module load singularity/3.9.0 2>/dev/null || \
   module load singularity 2>/dev/null || \
@@ -57,7 +60,6 @@ fi
 
 echo "container_runtime=$CONTAINER_RUNTIME"
 
-
 export SINGULARITY_CACHEDIR="$PROJECT_DIR/.singularity/cache"
 export APPTAINER_CACHEDIR="$SINGULARITY_CACHEDIR"
 export SINGULARITY_TMPDIR="$PROJECT_DIR/.singularity/tmp/${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID:-0}"
@@ -72,7 +74,10 @@ mkdir -p "$SINGULARITY_CACHEDIR" "$SINGULARITY_TMPDIR" \
   .cache/torchinductor \
   .cache/triton
 
-trap 'rm -rf "$SINGULARITY_TMPDIR"' EXIT
+cleanup_outer() {
+  rm -rf "$SINGULARITY_TMPDIR" || true
+}
+trap cleanup_outer EXIT
 
 echo "===== JOB INFO ====="
 echo "job=${SLURM_JOB_ID:-none} node=${SLURMD_NODENAME:-unknown} host=$(hostname)"
@@ -81,8 +86,12 @@ echo "model=$MODEL"
 echo "config=$CONFIG"
 echo "run_name=$RUN_NAME"
 echo "http_port=$HTTP_PORT"
+echo "group_port=$GROUP_PORT"
+echo "server_timeout=$SERVER_TIMEOUT"
 echo "server_gpu=$SERVER_GPU"
 echo "train_gpu=$TRAIN_GPU"
+echo "server_gpu_util=$SERVER_GPU_UTIL"
+echo "server_max_model_len=$SERVER_MAX_MODEL_LEN"
 echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-unset}"
 
 nvidia-smi || true
@@ -104,8 +113,12 @@ echo "MODEL=$MODEL"
 echo "CONFIG=$CONFIG"
 echo "RUN_NAME=$RUN_NAME"
 echo "HTTP_PORT=$HTTP_PORT"
+echo "GROUP_PORT=$GROUP_PORT"
+echo "SERVER_TIMEOUT=$SERVER_TIMEOUT"
 echo "SERVER_GPU=$SERVER_GPU"
 echo "TRAIN_GPU=$TRAIN_GPU"
+echo "SERVER_GPU_UTIL=$SERVER_GPU_UTIL"
+echo "SERVER_MAX_MODEL_LEN=$SERVER_MAX_MODEL_LEN"
 echo "outer CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-unset}"
 
 export PYTHONPATH=/workspace
@@ -125,21 +138,21 @@ export HF_DATASETS_OFFLINE=1
 export UNSLOTH_DISABLE_STATISTICS=1
 export TOKENIZERS_PARALLELISM=false
 
-# Avoid InfiniBand weirdness for same-node client/server communication.
 export NCCL_IB_DISABLE=1
 export NCCL_SOCKET_IFNAME=lo
 export GLOO_SOCKET_IFNAME=lo
 
 export GRPO_VLLM_SERVER_HOST=127.0.0.1
 export GRPO_VLLM_SERVER_PORT="$HTTP_PORT"
-export GRPO_VLLM_SERVER_TIMEOUT=300
+export GRPO_VLLM_GROUP_PORT="$GROUP_PORT"
+export GRPO_VLLM_SERVER_TIMEOUT="$SERVER_TIMEOUT"
 
 export RL_MAX_STEPS_OVERRIDE="$RL_MAX_STEPS_OVERRIDE"
 export RL_DATASET_LIMIT_OVERRIDE="$RL_DATASET_LIMIT_OVERRIDE"
 export GRPO_RUN_NAME="$RUN_NAME"
 
 if [[ -n "${GRPO_ADAPTER_OUTPUT_DIR:-}" ]]; then
-  export SINGULARITYENV_GRPO_ADAPTER_OUTPUT_DIR="$GRPO_ADAPTER_OUTPUT_DIR"
+  export GRPO_ADAPTER_OUTPUT_DIR="$GRPO_ADAPTER_OUTPUT_DIR"
 fi
 
 if [[ -n "${RL_INIT_ADAPTER:-}" ]]; then
@@ -155,14 +168,21 @@ for i in range(torch.cuda.device_count()):
     print(i, torch.cuda.get_device_name(i), torch.cuda.get_device_capability(i))
 PY
 
-cleanup() {
+cleanup_inner() {
   if [[ -n "${SERVER_PID:-}" ]]; then
     echo "===== STOP vLLM SERVER pid=$SERVER_PID ====="
     kill "$SERVER_PID" 2>/dev/null || true
     wait "$SERVER_PID" 2>/dev/null || true
   fi
 }
-trap cleanup EXIT
+trap cleanup_inner EXIT
+
+SERVER_STDOUT="/workspace/logs/slurm/grpo-server-2gpu-vllm-${SLURM_JOB_ID}.out"
+SERVER_STDERR="/workspace/logs/slurm/grpo-server-2gpu-vllm-${SLURM_JOB_ID}.err"
+rm -f "$SERVER_STDOUT" "$SERVER_STDERR"
+
+echo "server_stdout=$SERVER_STDOUT"
+echo "server_stderr=$SERVER_STDERR"
 
 echo "===== START TRL vLLM SERVER ON GPU $SERVER_GPU ====="
 CUDA_VISIBLE_DEVICES="$SERVER_GPU" /venv/main/bin/trl vllm-serve \
@@ -176,21 +196,61 @@ CUDA_VISIBLE_DEVICES="$SERVER_GPU" /venv/main/bin/trl vllm-serve \
   --enforce_eager "$SERVER_ENFORCE_EAGER" \
   --vllm_model_impl "$SERVER_MODEL_IMPL" \
   --log_level info \
-  > "/workspace/logs/slurm/grpo-server-2gpu-vllm-${SLURM_JOB_ID}.out" \
-  2> "/workspace/logs/slurm/grpo-server-2gpu-vllm-${SLURM_JOB_ID}.err" &
+  > "$SERVER_STDOUT" \
+  2> "$SERVER_STDERR" &
 
 SERVER_PID=$!
 echo "server_pid=$SERVER_PID"
 
 echo "===== WAIT FOR SERVER ====="
 python - <<PY
-import socket, time, sys, urllib.request
+import os
+import socket
+import subprocess
+import sys
+import time
+import urllib.request
 
 host = "127.0.0.1"
 port = int("$HTTP_PORT")
-deadline = time.time() + 300
+server_pid = int("$SERVER_PID")
+deadline = time.time() + int("$SERVER_TIMEOUT")
+server_stdout = "$SERVER_STDOUT"
+server_stderr = "$SERVER_STDERR"
+
+def tail_file(path, n=200):
+    print(f"===== TAIL {path} =====", file=sys.stderr)
+    try:
+        out = subprocess.run(["tail", "-n", str(n), path], text=True, capture_output=True)
+        if out.stdout:
+            print(out.stdout, file=sys.stderr)
+        if out.stderr:
+            print(out.stderr, file=sys.stderr)
+    except Exception as e:
+        print(f"tail failed for {path}: {e!r}", file=sys.stderr)
+
+def process_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    stat_path = f"/proc/{pid}/stat"
+    try:
+        with open(stat_path, "r", encoding="utf-8", errors="ignore") as f:
+            stat = f.read().split()
+        if len(stat) >= 3 and stat[2] == "Z":
+            return False
+    except Exception:
+        pass
+    return True
 
 while time.time() < deadline:
+    if not process_alive(server_pid):
+        print(f"server process died before TCP opened: pid={server_pid}", file=sys.stderr)
+        tail_file(server_stdout)
+        tail_file(server_stderr)
+        sys.exit(1)
+
     try:
         with socket.create_connection((host, port), timeout=2):
             print(f"tcp open: {host}:{port}")
@@ -199,6 +259,8 @@ while time.time() < deadline:
         time.sleep(2)
 else:
     print(f"server TCP did not open: {host}:{port}", file=sys.stderr)
+    tail_file(server_stdout)
+    tail_file(server_stderr)
     sys.exit(1)
 
 for path in ["/health/", "/get_world_size/"]:
@@ -251,6 +313,8 @@ srun "$CONTAINER_RUNTIME" exec --nv --cleanenv \
   --env CONFIG="$CONFIG" \
   --env RUN_NAME="$RUN_NAME" \
   --env HTTP_PORT="$HTTP_PORT" \
+  --env GROUP_PORT="$GROUP_PORT" \
+  --env SERVER_TIMEOUT="$SERVER_TIMEOUT" \
   --env SERVER_GPU="$SERVER_GPU" \
   --env TRAIN_GPU="$TRAIN_GPU" \
   --env SERVER_GPU_UTIL="$SERVER_GPU_UTIL" \
@@ -260,8 +324,7 @@ srun "$CONTAINER_RUNTIME" exec --nv --cleanenv \
   --env SERVER_ENFORCE_EAGER="$SERVER_ENFORCE_EAGER" \
   --env RL_MAX_STEPS_OVERRIDE="$RL_MAX_STEPS_OVERRIDE" \
   --env RL_DATASET_LIMIT_OVERRIDE="$RL_DATASET_LIMIT_OVERRIDE" \
-  --env RL_INIT_ADAPTER="${RL_INIT_ADAPTER:-}" \
-  --env SLURM_JOB_ID="${SLURM_JOB_ID:-manual}" \
-  --env PYTHONUNBUFFERED=1 \
+  --env RL_INIT_ADAPTER="$RL_INIT_ADAPTER" \
+  --env GRPO_ADAPTER_OUTPUT_DIR="$GRPO_ADAPTER_OUTPUT_DIR" \
   "$IMAGE" \
   bash "/workspace/$INNER_SCRIPT"
