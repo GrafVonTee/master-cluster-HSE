@@ -5,6 +5,7 @@ from multiprocessing import Process, Queue
 from typing import Any
 import contextlib
 import io
+import os
 
 import clingo
 
@@ -20,10 +21,29 @@ class ClingoSolveResult:
     timed_out: bool = False
 
 
+@contextlib.contextmanager
+def suppress_native_stderr():
+    """
+    clingo may write parser errors through native stderr, not Python sys.stderr.
+    Since scoring intentionally evaluates broken generated programs, suppress fd=2
+    inside the worker process to keep Slurm logs readable.
+    """
+    old_fd = os.dup(2)
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(devnull_fd, 2)
+        yield
+    finally:
+        os.dup2(old_fd, 2)
+        os.close(old_fd)
+        os.close(devnull_fd)
+
+
 def _solve_worker(program: str, max_models: int, queue: Queue) -> None:
     try:
         stderr_buf = io.StringIO()
-        with contextlib.redirect_stderr(stderr_buf):
+
+        with contextlib.redirect_stderr(stderr_buf), suppress_native_stderr():
             ctl = clingo.Control(["--warn=none"])
             ctl.add("base", [], program)
             ctl.ground([("base", [])])
