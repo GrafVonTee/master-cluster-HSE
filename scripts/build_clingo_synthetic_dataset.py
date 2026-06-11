@@ -381,9 +381,36 @@ def main() -> int:
 
     rows = build_rows()
 
-    test = rows[: args.test_size]
-    val = rows[args.test_size : args.test_size + args.val_size]
-    train = rows[args.test_size + args.val_size :]
+    # Stratified deterministic split by topic.
+    # The generator appends rows in topic blocks, so plain rows[:test_size]
+    # would create an artificially easy test set.
+    import random
+    from collections import defaultdict
+
+    rng = random.Random(42)
+    by_topic = defaultdict(list)
+    for row in rows:
+        by_topic[row["topic"]].append(row)
+
+    train, val, test = [], [], []
+
+    topics = sorted(by_topic)
+    for topic in topics:
+        bucket = list(by_topic[topic])
+        rng.shuffle(bucket)
+
+        # With 40 examples/topic and default 8 topics:
+        # test 6/topic = 48 total, val 6/topic = 48 total, train 28/topic = 224 total.
+        n_test = max(1, args.test_size // len(topics))
+        n_val = max(1, args.val_size // len(topics))
+
+        test.extend(bucket[:n_test])
+        val.extend(bucket[n_test : n_test + n_val])
+        train.extend(bucket[n_test + n_val :])
+
+    rng.shuffle(train)
+    rng.shuffle(val)
+    rng.shuffle(test)
 
     ds = DatasetDict(
         {
