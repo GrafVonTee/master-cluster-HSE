@@ -1,6 +1,6 @@
 dataset:
   name: clingo_synthetic_v2
-  disk_path: datasets/clingo/synthetic_v2_grouped_lora_train
+  disk_path: datasets/clingo/synthetic_v3_100_lora_train
   parquet_path:
   val_size: 24
   limit:
