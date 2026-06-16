@@ -1,0 +1,63 @@
+run:
+  name: grpo_clingo_optimization
+  seed: 42
+
+model:
+  base_model: /workspace/models/qwen3-1.7b
+  max_seq_length: 2048
+  load_in_4bit: false
+  fast_inference: true
+  gpu_memory_utilization: 0.70
+  local_files_only: true
+
+lora:
+  r: 32
+  lora_alpha: 32
+  dropout: 0.0
+  bias: none
+  use_gradient_checkpointing: unsloth
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+
+dataset:
+  disk_path: /workspace/datasets/clingo/synthetic_v3_100
+  split: train
+  limit: 128
+  seed: 42
+  prompt_format: chat
+  topic_filter:
+    - optimization_minimize
+
+reward:
+  timeout: 3.0
+  max_models: 1
+  error_reward: -1.0
+  min_chars: 8
+  max_chars: 8000
+
+training:
+  output_dir: /workspace/outputs/rl/grpo_clingo_optimization
+  logging_dir: /workspace/outputs/runs/rl/grpo_clingo_optimization
+  max_steps: 128
+  learning_rate: 0.000002
+  lr_scheduler_type: constant_with_warmup
+  warmup_ratio: 0.03
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 1
+  num_generations: 8
+  max_prompt_length: 1024
+  max_completion_length: 512
+  logging_steps: 1
+  save_steps: 32
+  save_total_limit: 2
+  report_to: tensorboard
+  beta: 0.0
+  use_vllm: true
+  remove_unused_columns: false
+  dataloader_num_workers: 0

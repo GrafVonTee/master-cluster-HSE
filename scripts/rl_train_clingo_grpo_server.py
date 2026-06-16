@@ -14,8 +14,8 @@ from unsloth import FastLanguageModel
 from trl import GRPOConfig, GRPOTrainer
 
 from src.rl.grpo_utils import read_yaml, set_seed
-from src.rl.pythoncodes_dataset import prepare_pythoncodes_grpo_dataset
-from src.rl.rewards import PythonRewardConfig, score_python_completion
+from src.rl.clingo_dataset import prepare_clingo_grpo_dataset
+from src.dsl.clingo.rewards import ClingoRewardConfig, score_clingo_completion
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -79,36 +79,20 @@ def completion_to_text(completion: Any) -> str:
     return str(completion)
 
 
-def make_reward_func(cfg: PythonRewardConfig):
-    def reward_func(completions, reference=None, tests=None, **kwargs):
+def make_reward_func(cfg: ClingoRewardConfig):
+    def reward_func(completions, task=None, **kwargs):
         n = len(completions)
-        references = reference if isinstance(reference, list) else [reference] * n
-        tests_list = tests if isinstance(tests, list) else [tests] * n
+        tasks = task if isinstance(task, list) else [task] * n
 
         scores = []
-        for completion, ref, test_cases in zip(completions, references, tests_list):
+        for completion, task_row in zip(completions, tasks):
             text = completion_to_text(completion)
-            ref = ref or ""
-
-            if test_cases is None:
-                test_cases = []
-            if isinstance(test_cases, str):
-                test_cases = [test_cases]
-            if not isinstance(test_cases, list):
-                test_cases = []
-
-            scores.append(
-                score_python_completion(
-                    text,
-                    reference=ref,
-                    tests=test_cases,
-                    cfg=cfg,
-                )
-            )
+            if task_row is None:
+                task_row = {}
+            scores.append(score_clingo_completion(text, task_row, cfg))
         return scores
 
     return reward_func
-
 
 
 def force_trainable_lora_graph(model):
@@ -228,7 +212,7 @@ def load_model_tokenizer(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="configs/rl/grpo_pythoncodes.yaml")
+    parser.add_argument("--config", default="configs/rl/grpo_clingo_optimization.yaml")
     parser.add_argument("--run-name", default=None)
     parser.add_argument("--base-model", default=None)
     parser.add_argument("--init-adapter", default=None)
@@ -242,7 +226,7 @@ def main() -> int:
         args.run_name
         or os.environ.get("GRPO_RUN_NAME")
         or cfg.get("run_name")
-        or "grpo_pythoncodes_server"
+        or "grpo_clingo_server"
     )
 
     model_cfg = dict(cfg.get("model", {}))
@@ -292,7 +276,7 @@ def main() -> int:
     set_seed(int(train_cfg.get("seed", 3407)))
 
     if args.dry_run:
-        ds = prepare_pythoncodes_grpo_dataset(dataset_cfg, tokenizer=None)
+        ds = prepare_clingo_grpo_dataset(dataset_cfg, tokenizer=None)
         print(f"[grpo-server] dry-run ok: rows={len(ds)} columns={ds.column_names}")
         return 0
 
@@ -303,11 +287,11 @@ def main() -> int:
         lora_cfg=lora_cfg,
     )
 
-    ds = prepare_pythoncodes_grpo_dataset(dataset_cfg, tokenizer=tokenizer)
+    ds = prepare_clingo_grpo_dataset(dataset_cfg, tokenizer=tokenizer)
     if len(ds) == 0:
         raise RuntimeError("Prepared GRPO dataset is empty.")
 
-    reward_cfg = PythonRewardConfig.from_dict(cfg.get("reward", {}))
+    reward_cfg = ClingoRewardConfig(**{k: v for k, v in dict(cfg.get("reward", {})).items() if k in {"timeout", "max_models", "error_reward", "min_chars", "max_chars"}})
 
     training_kwargs: dict[str, Any] = dict(
         output_dir=str(output_dir),

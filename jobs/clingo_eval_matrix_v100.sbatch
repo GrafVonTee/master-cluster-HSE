@@ -1,31 +1,39 @@
 #!/bin/bash
-#SBATCH --job-name=clingo-eval
+#SBATCH --job-name=clingo-eval-matrix
 #SBATCH --partition=rocky
 #SBATCH --gpus=1
 #SBATCH --cpus-per-task=2
 #SBATCH --time=04:00:00
-#SBATCH --output=logs/slurm/clingo-eval-%A_%a.out
-#SBATCH --error=logs/slurm/clingo-eval-%A_%a.err
+#SBATCH --array=1-1%1
+#SBATCH --output=logs/slurm/clingo-eval-matrix-%A_%a.out
+#SBATCH --error=logs/slurm/clingo-eval-matrix-%A_%a.err
 
 set -euo pipefail
 
 PROJECT_DIR="${PROJECT_DIR:-$HOME/master-cluster-HSE}"
 SANDBOX="${SANDBOX:-$PROJECT_DIR/containers/sandboxes/rl-grpo-v100-vllm085}"
-
-MODEL="${MODEL:?MODEL is required}"
-OUT_DIR="${OUT_DIR:?OUT_DIR is required}"
-DATASET="${DATASET:-/workspace/datasets/clingo/synthetic_v2}"
+MATRIX="${MATRIX:?Set MATRIX=path/to/eval_matrix.tsv}"
+PARTS_ROOT="${PARTS_ROOT:-outputs/clingo_v3_100_small}"
+DATASET="${DATASET:-/workspace/datasets/clingo/synthetic_v3_100}"
 SPLIT="${SPLIT:-test}"
 LIMIT="${LIMIT:-0}"
-ADAPTER="${ADAPTER:-}"
 MAX_TOKENS="${MAX_TOKENS:-512}"
 GPU_UTIL="${GPU_UTIL:-0.75}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-2048}"
 
 cd "$PROJECT_DIR"
 
-module purge
+LINE="$(sed -n "${SLURM_ARRAY_TASK_ID}p" "$MATRIX")"
+if [[ -z "$LINE" ]]; then
+  echo "No eval matrix row for task ${SLURM_ARRAY_TASK_ID} in $MATRIX" >&2
+  exit 2
+fi
 
+IFS=$'\t' read -r EXP_NAME MODEL ADAPTER <<< "$LINE"
+ADAPTER="${ADAPTER:-}"
+OUT_DIR="/workspace/${PARTS_ROOT}/${EXP_NAME}"
+
+module purge
 if command -v module >/dev/null 2>&1; then
   module load singularity/3.9.0 2>/dev/null || \
   module load singularity 2>/dev/null || \
@@ -45,14 +53,14 @@ fi
 
 export SINGULARITY_CACHEDIR="$PROJECT_DIR/.singularity/cache"
 export APPTAINER_CACHEDIR="$SINGULARITY_CACHEDIR"
-export SINGULARITY_TMPDIR="$PROJECT_DIR/.singularity/tmp/clingo_eval_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID:-0}"
+export SINGULARITY_TMPDIR="$PROJECT_DIR/.singularity/tmp/clingo_eval_matrix_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID:-0}"
 export APPTAINER_TMPDIR="$SINGULARITY_TMPDIR"
 
 mkdir -p \
   "$SINGULARITY_CACHEDIR" \
   "$SINGULARITY_TMPDIR" \
   logs/slurm \
-  outputs/clingo \
+  "$PARTS_ROOT/$EXP_NAME" \
   .home \
   .cache/huggingface/datasets \
   .cache/vllm \
@@ -66,10 +74,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "===== CLINGO EVAL JOB INFO ====="
+echo "===== CLINGO EVAL MATRIX JOB INFO ====="
 echo "job=${SLURM_JOB_ID:-none} array=${SLURM_ARRAY_TASK_ID:-none} node=${SLURMD_NODENAME:-unknown} host=$(hostname)"
 echo "container_runtime=$CONTAINER_RUNTIME"
 echo "sandbox=$SANDBOX"
+echo "matrix=$MATRIX"
+echo "experiment=$EXP_NAME"
 echo "model=$MODEL"
 echo "adapter=$ADAPTER"
 echo "dataset=$DATASET"

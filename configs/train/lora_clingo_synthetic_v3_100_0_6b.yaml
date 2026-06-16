@@ -1,0 +1,69 @@
+dataset:
+  name: clingo_synthetic_v3_100
+  disk_path: datasets/clingo/synthetic_v3_100_lora_train
+  parquet_path:
+  val_size: 24
+  limit:
+  seed: 42
+
+curriculum:
+  stages: [easy, medium, hard]
+  distribution_stage_size: 160
+  distribution_stages:
+    - name: d1_80_15_5
+      weights: {easy: 0.80, medium: 0.15, hard: 0.05}
+    - name: d2_40_40_20
+      weights: {easy: 0.40, medium: 0.40, hard: 0.20}
+    - name: d3_20_20_60
+      weights: {easy: 0.20, medium: 0.20, hard: 0.60}
+
+model:
+  base_model: /workspace/models/qwen3-0.6b
+  output_model_prefix: /workspace/models/qwen3-0.6b-sft
+  load_in_4bit: false
+  dtype:
+
+lora:
+  r: 32
+  alpha: 32
+  dropout: 0
+  bias: none
+  use_gradient_checkpointing: unsloth
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+
+training:
+  train_batch_size: 8
+  gradient_steps: 4
+  max_steps: 300
+  stage_max_steps: 100
+  warmup_steps: 10
+  lr: 0.0001
+  lr_scheduler_type: cosine
+  optim: paged_adamw_8bit
+  assistant_only_loss: true
+  packing: false
+  logging_steps: 5
+  eval_steps: 20
+  save_steps: 60
+  save_total_limit: 2
+  report_to: tensorboard
+  dataloader_num_workers: 2
+  dataloader_pin_memory: true
+  max_grad_norm: 1.0
+  seed: 42
+
+runs:
+  - name: sft_clingo
+    category_col:
+    schedule_type: plain
+
+  - name: clingo_difficulty_distribution
+    category_col: difficulty_category
+    schedule_type: distribution

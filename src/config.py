@@ -31,6 +31,27 @@ for p in [
 
 
 MODELS = {
+    # Small-model aliases used by the V100 experiment matrix.
+    # Qwen3 small-model experiments use the real 0.6B checkpoint; aliases keep
+    # shell-safe names for environment variables and output directories.
+    # Override these paths/names on the cluster if your local cache uses a
+    # different folder name.
+    "0_6b": {
+        "name": os.environ.get("MODEL_0_6B_NAME", "Qwen/Qwen3-0.6B"),
+        "path": os.environ.get("MODEL_0_6B_PATH", str(MODELS_DIR / "qwen3-0.6b")),
+    },
+    "0.6b": {
+        "name": os.environ.get("MODEL_0_6B_NAME", "Qwen/Qwen3-0.6B"),
+        "path": os.environ.get("MODEL_0_6B_PATH", str(MODELS_DIR / "qwen3-0.6b")),
+    },
+    "1_7b": {
+        "name": os.environ.get("MODEL_1_7B_NAME", "Qwen/Qwen3-1.7B"),
+        "path": os.environ.get("MODEL_1_7B_PATH", str(MODELS_DIR / "qwen3-1.7b")),
+    },
+    "1.7b": {
+        "name": os.environ.get("MODEL_1_7B_NAME", "Qwen/Qwen3-1.7B"),
+        "path": os.environ.get("MODEL_1_7B_PATH", str(MODELS_DIR / "qwen3-1.7b")),
+    },
     "4b": {
         "name": "Qwen/Qwen3-4B",
         "path": str(MODELS_DIR / "qwen3-4b"),
