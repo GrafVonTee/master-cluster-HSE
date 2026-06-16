@@ -16,6 +16,7 @@ OUT="${OUT:-/workspace/outputs/clingo_v4/validation}"
 REQUIRE_CHANGED="${REQUIRE_CHANGED:-1}"
 SKIP_SOLVER="${SKIP_SOLVER:-0}"
 ALLOW_SUBSET="${ALLOW_SUBSET:-0}"
+ALLOW_EXISTING_REFERENCE_SCORE_FAILURES="${ALLOW_EXISTING_REFERENCE_SCORE_FAILURES:-0}"
 
 cd "$PROJECT_DIR"
 
@@ -51,6 +52,9 @@ if [[ "$SKIP_SOLVER" == "1" ]]; then
 fi
 if [[ "$ALLOW_SUBSET" == "1" ]]; then
   ARGS+=(--allow-subset)
+fi
+if [[ "$ALLOW_EXISTING_REFERENCE_SCORE_FAILURES" == "1" ]]; then
+  ARGS+=(--allow-existing-reference-score-failures)
 fi
 
 srun "$CONTAINER_RUNTIME" exec --cleanenv \

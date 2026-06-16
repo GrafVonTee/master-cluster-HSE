@@ -57,6 +57,7 @@ def main() -> int:
     parser.add_argument("--out", default="outputs/clingo_v4/validation")
     parser.add_argument("--timeout", type=float, default=3.0)
     parser.add_argument("--skip-solver", action="store_true")
+    parser.add_argument("--allow-existing-reference-score-failures", action="store_true", help="Do not fail v4 validation when an unchanged source v3 reference already has solver score < 1.0; fail only if target score regresses.")
     parser.add_argument("--allow-subset", action="store_true", help="Allow target split to contain only a subset of source rows; useful for smoke tests.")
     parser.add_argument("--require-instruction-changed", action="store_true")
     args = parser.parse_args()
@@ -124,9 +125,24 @@ def main() -> int:
 
             if not args.skip_solver:
                 score = _validate_reference(tgt, timeout=args.timeout)
-                solver_rows.append({"split": split, "task_id": tgt.get("task_id"), "source_task_id": source_task_id, "score": score})
+                src_score = _validate_reference(src, timeout=args.timeout)
+                solver_rows.append({
+                    "split": split,
+                    "task_id": tgt.get("task_id"),
+                    "source_task_id": source_task_id,
+                    "score": score,
+                    "source_score": src_score,
+                })
+
                 if score < 1.0:
-                    errors.append(f"{split}[{idx}] {source_task_id}: reference solver score={score}")
+                    if args.allow_existing_reference_score_failures and score >= src_score:
+                        warnings.append(
+                            f"{split}[{idx}] {source_task_id}: unchanged/reference inherited non-perfect solver score: source={src_score} target={score}"
+                        )
+                    else:
+                        errors.append(
+                            f"{split}[{idx}] {source_task_id}: reference solver score={score} source_score={src_score}"
+                        )
 
         if args.require_instruction_changed and unchanged:
             errors.append(f"{split}: {unchanged} instructions are unchanged under --require-instruction-changed")
@@ -137,7 +153,7 @@ def main() -> int:
     _write_diagnostics(out_dir / "diagnostics_counts.csv", diagnostics)
     if solver_rows:
         with (out_dir / "reference_solver_scores.csv").open("w", encoding="utf-8", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["split", "task_id", "source_task_id", "score"])
+            writer = csv.DictWriter(f, fieldnames=["split", "task_id", "source_task_id", "score", "source_score"])
             writer.writeheader()
             writer.writerows(solver_rows)
 
