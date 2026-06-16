@@ -9,12 +9,11 @@ fetches Qwen3-14B.  For small-model experiments use, for example:
 The script intentionally imports only huggingface_hub, not Unsloth/vLLM.
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import os
 from pathlib import Path
+from typing import List, Tuple
 
 from huggingface_hub import snapshot_download
 
@@ -34,8 +33,8 @@ MODEL_ALIASES = {
 }
 
 
-def parse_models(raw_items: list[str]) -> list[str]:
-    models: list[str] = []
+def parse_models(raw_items: List[str]) -> List[str]:
+    models: List[str] = []
     for raw in raw_items:
         for item in raw.split(","):
             item = item.strip()
@@ -44,7 +43,7 @@ def parse_models(raw_items: list[str]) -> list[str]:
     return models or ["14b"]
 
 
-def resolve_model(alias_or_repo: str, local_dir_root: Path) -> tuple[str, Path]:
+def resolve_model(alias_or_repo: str, local_dir_root: Path) -> Tuple[str, Path]:
     key = alias_or_repo.strip()
     if key in MODEL_ALIASES:
         repo_id, folder = MODEL_ALIASES[key]
