@@ -15,6 +15,7 @@ TARGET="${TARGET:-/workspace/datasets/clingo/synthetic_v4}"
 OUT="${OUT:-/workspace/outputs/clingo_v4/validation}"
 REQUIRE_CHANGED="${REQUIRE_CHANGED:-1}"
 SKIP_SOLVER="${SKIP_SOLVER:-0}"
+ALLOW_SUBSET="${ALLOW_SUBSET:-0}"
 
 cd "$PROJECT_DIR"
 
@@ -47,6 +48,9 @@ if [[ "$REQUIRE_CHANGED" == "1" ]]; then
 fi
 if [[ "$SKIP_SOLVER" == "1" ]]; then
   ARGS+=(--skip-solver)
+fi
+if [[ "$ALLOW_SUBSET" == "1" ]]; then
+  ARGS+=(--allow-subset)
 fi
 
 srun "$CONTAINER_RUNTIME" exec --cleanenv \

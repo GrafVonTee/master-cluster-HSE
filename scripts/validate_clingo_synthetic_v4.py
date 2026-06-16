@@ -57,6 +57,7 @@ def main() -> int:
     parser.add_argument("--out", default="outputs/clingo_v4/validation")
     parser.add_argument("--timeout", type=float, default=3.0)
     parser.add_argument("--skip-solver", action="store_true")
+    parser.add_argument("--allow-subset", action="store_true", help="Allow target split to contain only a subset of source rows; useful for smoke tests.")
     parser.add_argument("--require-instruction-changed", action="store_true")
     args = parser.parse_args()
 
@@ -77,7 +78,10 @@ def main() -> int:
         src_rows = [dict(r) for r in source[split]]
         tgt_rows = [dict(r) for r in target[split]]
         if len(src_rows) != len(tgt_rows):
-            errors.append(f"{split}: row count differs: source={len(src_rows)} target={len(tgt_rows)}")
+            if args.allow_subset and len(tgt_rows) <= len(src_rows):
+                warnings.append(f"{split}: target is subset: source={len(src_rows)} target={len(tgt_rows)}")
+            else:
+                errors.append(f"{split}: row count differs: source={len(src_rows)} target={len(tgt_rows)}")
 
         diagnostics.append({"split": split, "kind": "split", "name": split, "count": len(tgt_rows)})
         for topic, count in _counts(tgt_rows, "topic").items():
