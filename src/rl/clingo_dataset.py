@@ -1,14 +1,12 @@
-from __future__ import annotations
-
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from datasets import Dataset, DatasetDict, load_from_disk
 
 from src.data.prompt.clingo_synthetic import build_messages, build_prompt
 
 
-def _path_or_none(value: Any) -> Path | None:
+def _path_or_none(value: Any) -> Optional[Path]:
     if value is None:
         return None
     s = str(value).strip()
@@ -17,7 +15,7 @@ def _path_or_none(value: Any) -> Path | None:
     return Path(s)
 
 
-def _as_list(value: Any) -> list[str]:
+def _as_list(value: Any) -> List[str]:
     if value is None:
         return []
     if isinstance(value, list):
@@ -28,7 +26,7 @@ def _as_list(value: Any) -> list[str]:
     return [s] if s else []
 
 
-def load_clingo_source(dataset_cfg: dict[str, Any]) -> Dataset:
+def load_clingo_source(dataset_cfg: Dict[str, Any]) -> Dataset:
     split = str(dataset_cfg.get("split", "train"))
     disk_path = _path_or_none(dataset_cfg.get("disk_path"))
     if not disk_path or not disk_path.exists():
@@ -61,7 +59,7 @@ def load_clingo_source(dataset_cfg: dict[str, Any]) -> Dataset:
     return ds
 
 
-def _serializable_task(row: dict[str, Any]) -> dict[str, Any]:
+def _serializable_task(row: Dict[str, Any]) -> Dict[str, Any]:
     keep = [
         "task_id",
         "source_task_id",
@@ -80,11 +78,11 @@ def _serializable_task(row: dict[str, Any]) -> dict[str, Any]:
     return {k: row.get(k) for k in keep if k in row}
 
 
-def prepare_clingo_grpo_dataset(dataset_cfg: dict[str, Any], tokenizer=None) -> Dataset:
+def prepare_clingo_grpo_dataset(dataset_cfg: Dict[str, Any], tokenizer=None) -> Dataset:
     ds = load_clingo_source(dataset_cfg)
     prompt_format = str(dataset_cfg.get("prompt_format", "chat")).strip().lower()
 
-    def convert(row: dict[str, Any]) -> dict[str, Any]:
+    def convert(row: Dict[str, Any]) -> Dict[str, Any]:
         if prompt_format == "text" and tokenizer is not None:
             prompt = build_prompt(row, tokenizer=tokenizer, train=False)["text"]
         else:

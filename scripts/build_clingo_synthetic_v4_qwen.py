@@ -8,13 +8,11 @@ Default source: datasets/clingo/synthetic_v3_100
 Default target: datasets/clingo/synthetic_v4
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from datasets import Dataset, DatasetDict, load_from_disk
 
@@ -52,7 +50,7 @@ def _as_text(value: Any) -> str:
 
 
 def _extract_show_predicates(reference: str) -> str:
-    shows: list[str] = []
+    shows: List[str] = []
     for line in reference.splitlines():
         line = line.strip()
         if line.startswith("#show"):
@@ -68,7 +66,7 @@ def _make_task_id(source_task_id: str, preserve: bool) -> str:
     return "v4_" + source_task_id
 
 
-def _build_rewrite_messages(row: dict[str, Any]) -> list[dict[str, str]]:
+def _build_rewrite_messages(row: Dict[str, Any]) -> List[Dict[str, str]]:
     instruction = _as_text(row.get("instruction"))
     reference = _as_text(row.get("reference") or row.get("output"))
     show_predicates = _extract_show_predicates(reference)
@@ -120,14 +118,14 @@ def _fallback_if_bad(original: str, candidate: str) -> str:
     return candidate
 
 
-def _load_split_rows(source: Path) -> dict[str, list[dict[str, Any]]]:
+def _load_split_rows(source: Path) -> Dict[str, List[Dict[str, Any]]]:
     loaded = load_from_disk(str(source))
     if isinstance(loaded, DatasetDict):
         return {split: [dict(r) for r in loaded[split]] for split in loaded.keys()}
     return {"train": [dict(r) for r in loaded]}
 
 
-def _format_prompt(tokenizer, messages: list[dict[str, str]]) -> str:
+def _format_prompt(tokenizer, messages: List[Dict[str, str]]) -> str:
     try:
         return tokenizer.apply_chat_template(
             messages,
@@ -143,7 +141,7 @@ def _format_prompt(tokenizer, messages: list[dict[str, str]]) -> str:
         )
 
 
-def _generate_paraphrases(rows: list[dict[str, Any]], args: argparse.Namespace) -> list[str]:
+def _generate_paraphrases(rows: List[Dict[str, Any]], args: argparse.Namespace) -> List[str]:
     if args.dry_copy:
         return [_as_text(r.get("instruction")) for r in rows]
 
@@ -177,7 +175,7 @@ def _generate_paraphrases(rows: list[dict[str, Any]], args: argparse.Namespace) 
     return [out.outputs[0].text if out.outputs else "" for out in outputs]
 
 
-def _make_v4_row(row: dict[str, Any], new_instruction: str, preserve_task_id: bool) -> dict[str, Any]:
+def _make_v4_row(row: Dict[str, Any], new_instruction: str, preserve_task_id: bool) -> Dict[str, Any]:
     source_task_id = str(row.get("task_id", "")).strip()
     original_instruction = _as_text(row.get("instruction"))
     final_instruction = _fallback_if_bad(original_instruction, new_instruction)
@@ -197,7 +195,7 @@ def _make_v4_row(row: dict[str, Any], new_instruction: str, preserve_task_id: bo
     return out
 
 
-def _write_manifest(out_dir: Path, payload: dict[str, Any]) -> None:
+def _write_manifest(out_dir: Path, payload: Dict[str, Any]) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "v4_generation_manifest.json").write_text(
         json.dumps(payload, indent=2, ensure_ascii=False),
@@ -235,8 +233,8 @@ def main() -> int:
     if missing:
         raise SystemExit(f"Missing splits in source dataset: {missing}. Available: {list(source_rows_by_split)}")
 
-    new_splits: dict[str, Dataset] = {}
-    manifest: dict[str, Any] = {
+    new_splits: Dict[str, Dataset] = {}
+    manifest: Dict[str, Any] = {
         "source": str(source),
         "out": str(out_dir),
         "model": args.model,

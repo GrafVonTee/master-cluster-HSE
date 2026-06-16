@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-from __future__ import annotations
-
 import argparse
 import dataclasses
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 # Must be set before importing Unsloth.
 os.environ.setdefault("UNSLOTH_DISABLE_STATISTICS", "1")
@@ -56,7 +54,7 @@ def resolve_workspace_path(value: Any) -> Any:
     return value
 
 
-def filter_dataclass_kwargs(cls: type, kwargs: dict[str, Any]) -> dict[str, Any]:
+def filter_dataclass_kwargs(cls: type, kwargs: Dict[str, Any]) -> Dict[str, Any]:
     names = {field.name for field in dataclasses.fields(cls)}
     return {k: v for k, v in kwargs.items() if k in names}
 
@@ -160,8 +158,8 @@ def load_model_tokenizer(
     base_model: str,
     *,
     local_files_only: bool,
-    init_adapter: str | None,
-    lora_cfg: dict[str, Any],
+    init_adapter: Optional[str],
+    lora_cfg: Dict[str, Any],
 ):
     import torch
 
@@ -293,7 +291,7 @@ def main() -> int:
 
     reward_cfg = ClingoRewardConfig(**{k: v for k, v in dict(cfg.get("reward", {})).items() if k in {"timeout", "max_models", "error_reward", "min_chars", "max_chars"}})
 
-    training_kwargs: dict[str, Any] = dict(
+    training_kwargs: Dict[str, Any] = dict(
         output_dir=str(output_dir),
         max_steps=max_steps,
         learning_rate=float(train_cfg.get("learning_rate", 5e-6)),

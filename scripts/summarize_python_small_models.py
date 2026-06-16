@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """Build PythonCodes small-model summary with macro/weighted averages and deltas."""
 
-from __future__ import annotations
-
 import argparse
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import pandas as pd
 
@@ -14,7 +12,7 @@ METRIC_COLS = ["greedy@1", "pass@1 (n=1)", "mean_%passed", "mean_entropy"]
 
 
 def load_model_summaries(root: Path) -> pd.DataFrame:
-    frames: list[pd.DataFrame] = []
+    frames: List[pd.DataFrame] = []
     for csv_path in sorted(root.glob("*/all_eval/lora_eval_summary.csv")):
         model = csv_path.parent.parent.name
         df = pd.read_csv(csv_path)
@@ -30,7 +28,7 @@ def add_averages(df: pd.DataFrame) -> pd.DataFrame:
     rows = [r.to_dict() for _, r in df.iterrows()]
 
     for (model, exp), group in df.groupby(["model", "experiment"], dropna=False):
-        macro: dict[str, Any] = {
+        macro: Dict[str, Any] = {
             "model": model,
             "experiment": exp,
             "benchmark": "macro_avg",
@@ -56,7 +54,7 @@ def add_averages(df: pd.DataFrame) -> pd.DataFrame:
 
 def add_deltas(df: pd.DataFrame) -> pd.DataFrame:
     metric_cols = [c for c in METRIC_COLS if c in df.columns]
-    rows: list[dict[str, Any]] = []
+    rows: List[Dict[str, Any]] = []
     for _, group in df.groupby(["model", "benchmark"], dropna=False):
         base = group[group["experiment"] == "base"]
         sft = group[group["experiment"] == "sft_pythoncodes"]

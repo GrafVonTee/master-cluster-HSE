@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """Validate that Clingo synthetic v4 changes only instruction/prompt fields."""
 
-from __future__ import annotations
-
 import argparse
 import csv
 import json
 from collections import Counter
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from datasets import Dataset, DatasetDict, load_from_disk
 
@@ -22,18 +20,18 @@ def _canonical(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
 
 
-def _load(path: str | Path) -> dict[str, Dataset]:
+def _load(path: Union[str, Path]) -> Dict[str, Dataset]:
     loaded = load_from_disk(str(path))
     if isinstance(loaded, DatasetDict):
         return {split: loaded[split] for split in loaded.keys()}
     return {"train": loaded}
 
 
-def _counts(rows: list[dict[str, Any]], field: str) -> dict[str, int]:
+def _counts(rows: List[Dict[str, Any]], field: str) -> Dict[str, int]:
     return dict(sorted(Counter(str(r.get(field, "")) for r in rows).items()))
 
 
-def _write_diagnostics(path: Path, diagnostics: list[dict[str, Any]]) -> None:
+def _write_diagnostics(path: Path, diagnostics: List[Dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(
@@ -45,7 +43,7 @@ def _write_diagnostics(path: Path, diagnostics: list[dict[str, Any]]) -> None:
             writer.writerow(item)
 
 
-def _validate_reference(row: dict[str, Any], timeout: float) -> float:
+def _validate_reference(row: Dict[str, Any], timeout: float) -> float:
     from src.dsl.clingo.rewards import ClingoRewardConfig, score_clingo_completion
 
     cfg = ClingoRewardConfig(timeout=timeout, max_models=1)
@@ -67,10 +65,10 @@ def main() -> int:
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    errors: list[str] = []
-    warnings: list[str] = []
-    diagnostics: list[dict[str, Any]] = []
-    solver_rows: list[dict[str, Any]] = []
+    errors: List[str] = []
+    warnings: List[str] = []
+    diagnostics: List[Dict[str, Any]] = []
+    solver_rows: List[Dict[str, Any]] = []
 
     if set(source) != set(target):
         errors.append(f"Split set differs: source={sorted(source)} target={sorted(target)}")

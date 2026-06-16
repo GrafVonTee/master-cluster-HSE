@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Write train/eval matrices for PythonCodes 0.6B/1.7B SFT+CL experiments."""
 
-from __future__ import annotations
-
 import argparse
 import json
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 
 CRITERIA = ["length", "perplexity", "lexical", "semantic", "llm_judge"]
@@ -25,7 +24,7 @@ MODEL_SPECS = {
 }
 
 
-def write_lines(path: Path, rows: list[str]) -> None:
+def write_lines(path: Path, rows: List[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(rows) + "\n", encoding="utf-8")
 

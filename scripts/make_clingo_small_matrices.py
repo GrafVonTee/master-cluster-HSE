@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Write train/eval matrices for Clingo v3_100 small-model experiments."""
 
-from __future__ import annotations
-
 import argparse
 import json
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 
 MODEL_SPECS = {
@@ -31,7 +30,7 @@ VARIANTS = [
 ]
 
 
-def write_lines(path: Path, rows: list[str]) -> None:
+def write_lines(path: Path, rows: List[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(rows) + "\n", encoding="utf-8")
 
@@ -58,7 +57,7 @@ def main() -> int:
 
         write_lines(train_file, TRAIN_RUNS)
 
-        eval_rows: list[str] = []
+        eval_rows: List[str] = []
         for variant, run_name in VARIANTS:
             exp_name = f"{args.prefix}_{alias}_{variant}"
             adapter = ""

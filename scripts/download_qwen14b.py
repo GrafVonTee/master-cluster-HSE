@@ -13,9 +13,25 @@ import argparse
 import json
 import os
 from pathlib import Path
-from typing import List, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-from huggingface_hub import snapshot_download
+import sys
+
+
+def get_snapshot_download():
+    try:
+        from huggingface_hub import snapshot_download
+        return snapshot_download
+    except ImportError:
+        msg = (
+            "ERROR: Python package huggingface_hub is not installed in this interpreter.\n"
+            "The system python on the login node is often too old. Use one of these options:\n"
+            "  1) bash scripts/bootstrap_hf_download_env.sh && source .venv-hf-download/bin/activate\n"
+            "  2) run this script from a Singularity sandbox/python env that already has huggingface_hub\n"
+            "  3) if git-lfs exists: bash scripts/download_qwen_git_lfs.sh 0_6b 1_7b\n"
+        )
+        sys.stderr.write(msg)
+        raise SystemExit(2)
 
 
 PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", Path(__file__).resolve().parents[1])).resolve()
@@ -98,6 +114,7 @@ def main() -> int:
         print(f"local_dir={local_dir}", flush=True)
         print(f"cache_dir={cache_dir}", flush=True)
 
+        snapshot_download = get_snapshot_download()
         path = snapshot_download(
             repo_id=repo_id,
             revision=args.revision,

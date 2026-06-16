@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """Collect Clingo eval summaries and compute deltas against base/SFT."""
 
-from __future__ import annotations
-
 import argparse
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import pandas as pd
 
@@ -14,7 +12,7 @@ import pandas as pd
 METRIC_COLS = ["mean_reward", "full_pass_rate", "partial_rate", "error_rate"]
 
 
-def infer_model_variant(exp: str) -> tuple[str, str]:
+def infer_model_variant(exp: str) -> Tuple[str, str]:
     # Expected examples: eval_0_6b_base, eval_1_7b_sft, eval_0_6b_cl.
     m = re.match(r"(?:eval_)?(?P<model>.+)_(?P<variant>base|sft|cl)$", exp)
     if m:
@@ -23,7 +21,7 @@ def infer_model_variant(exp: str) -> tuple[str, str]:
 
 
 def load_parts(root: Path) -> pd.DataFrame:
-    frames: list[pd.DataFrame] = []
+    frames: List[pd.DataFrame] = []
     for summary_path in sorted(root.glob("*/summary.csv")):
         exp = summary_path.parent.name
         df = pd.read_csv(summary_path)
@@ -38,7 +36,7 @@ def load_parts(root: Path) -> pd.DataFrame:
 
 
 def add_deltas(df: pd.DataFrame) -> pd.DataFrame:
-    out_rows: list[dict[str, Any]] = []
+    out_rows: List[Dict[str, Any]] = []
     keys = ["model", "group", "name"]
     for _, group in df.groupby(keys, dropna=False):
         base = group[group["variant"] == "base"]
