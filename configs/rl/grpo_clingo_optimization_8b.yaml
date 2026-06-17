@@ -1,0 +1,58 @@
+dataset:
+  disk_path: /workspace/datasets/clingo/synthetic_v3_100
+  limit: 128
+  prompt_format: chat
+  seed: 42
+  split: train
+  topic_filter:
+  - optimization_minimize
+lora:
+  bias: none
+  dropout: 0.0
+  lora_alpha: 32
+  r: 32
+  target_modules:
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+  - gate_proj
+  - up_proj
+  - down_proj
+  use_gradient_checkpointing: unsloth
+model:
+  base_model: /workspace/models/qwen3-1.7b
+  fast_inference: true
+  gpu_memory_utilization: 0.7
+  load_in_4bit: false
+  local_files_only: true
+  max_seq_length: 2048
+reward:
+  error_reward: -1.0
+  max_chars: 8000
+  max_models: 1
+  min_chars: 8
+  timeout: 3.0
+run:
+  name: grpo_clingo_optimization_sft_8b
+  seed: 42
+training:
+  beta: 0.0
+  dataloader_num_workers: 0
+  gradient_accumulation_steps: 1
+  learning_rate: 2.0e-06
+  logging_dir: /workspace/outputs/runs/rl/grpo_clingo_optimization_sft_8b
+  logging_steps: 1
+  lr_scheduler_type: constant_with_warmup
+  max_completion_length: 512
+  max_prompt_length: 1024
+  max_steps: 64
+  num_generations: 4
+  output_dir: /workspace/outputs/rl/grpo_clingo_optimization_sft_8b
+  per_device_train_batch_size: 1
+  remove_unused_columns: false
+  report_to: []
+  save_steps: 32
+  save_total_limit: 2
+  use_vllm: true
+  warmup_ratio: 0.03
