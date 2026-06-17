@@ -1,0 +1,115 @@
+dataset:
+  name: clingo_synthetic_v3_100_exact5_scored
+  disk_path: datasets/clingo/synthetic_v3_100_exact5_scored
+  parquet_path: null
+  val_size: 24
+  limit: null
+  seed: 42
+curriculum:
+  stages:
+  - easy
+  - medium
+  - hard
+  distribution_stage_size: 160
+  distribution_stages:
+  - name: d1_80_15_5
+    weights:
+      easy: 0.8
+      medium: 0.15
+      hard: 0.05
+  - name: d2_40_40_20
+    weights:
+      easy: 0.4
+      medium: 0.4
+      hard: 0.2
+  - name: d3_20_20_60
+    weights:
+      easy: 0.2
+      medium: 0.2
+      hard: 0.6
+model:
+  base_model: /workspace/models/qwen3-0.6b
+  output_model_prefix: /workspace/models/qwen3-0.6b-sft
+  load_in_4bit: false
+  dtype: null
+lora:
+  r: 32
+  alpha: 32
+  dropout: 0
+  bias: none
+  use_gradient_checkpointing: unsloth
+  target_modules:
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+  - gate_proj
+  - up_proj
+  - down_proj
+training:
+  train_batch_size: 4
+  gradient_steps: 4
+  max_steps: 300
+  stage_max_steps: 100
+  warmup_steps: 10
+  lr: 0.0001
+  lr_scheduler_type: cosine
+  optim: paged_adamw_8bit
+  assistant_only_loss: true
+  packing: false
+  logging_steps: 5
+  eval_steps: 20
+  save_steps: 60
+  save_total_limit: 2
+  report_to: none
+  dataloader_num_workers: 0
+  dataloader_pin_memory: false
+  max_grad_norm: 1.0
+  seed: 42
+runs:
+- name: cl_length_staged
+  category_col: length_category
+  schedule_type: staged
+- name: cl_perplexity_staged
+  category_col: ppl_category
+  schedule_type: staged
+- name: cl_lexical_staged
+  category_col: lexical_cluster_category
+  schedule_type: staged
+- name: cl_semantic_staged
+  category_col: semantic_cluster_category
+  schedule_type: staged
+- name: cl_llm_judge_staged
+  category_col: llm_judge_category
+  schedule_type: staged
+- name: cl_length_cumulative
+  category_col: length_category
+  schedule_type: cumulative
+- name: cl_perplexity_cumulative
+  category_col: ppl_category
+  schedule_type: cumulative
+- name: cl_lexical_cumulative
+  category_col: lexical_cluster_category
+  schedule_type: cumulative
+- name: cl_semantic_cumulative
+  category_col: semantic_cluster_category
+  schedule_type: cumulative
+- name: cl_llm_judge_cumulative
+  category_col: llm_judge_category
+  schedule_type: cumulative
+- name: cl_length_distribution
+  category_col: length_category
+  schedule_type: distribution
+- name: cl_perplexity_distribution
+  category_col: ppl_category
+  schedule_type: distribution
+- name: cl_lexical_distribution
+  category_col: lexical_cluster_category
+  schedule_type: distribution
+- name: cl_semantic_distribution
+  category_col: semantic_cluster_category
+  schedule_type: distribution
+- name: cl_llm_judge_distribution
+  category_col: llm_judge_category
+  schedule_type: distribution
+\ntraining:\n  report_to: none\n

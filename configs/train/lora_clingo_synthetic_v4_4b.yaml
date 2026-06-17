@@ -1,0 +1,71 @@
+dataset:
+  name: clingo_synthetic_v4
+  disk_path: datasets/clingo/synthetic_v4_lora_train
+  parquet_path: null
+  val_size: 24
+  limit: null
+  seed: 42
+curriculum:
+  stages:
+  - easy
+  - medium
+  - hard
+  distribution_stage_size: 160
+  distribution_stages:
+  - name: d1_80_15_5
+    weights:
+      easy: 0.8
+      medium: 0.15
+      hard: 0.05
+  - name: d2_40_40_20
+    weights:
+      easy: 0.4
+      medium: 0.4
+      hard: 0.2
+  - name: d3_20_20_60
+    weights:
+      easy: 0.2
+      medium: 0.2
+      hard: 0.6
+model:
+  base_model: /workspace/models/qwen3-4b
+  output_model_prefix: /workspace/models/qwen3-4b-sft
+  load_in_4bit: false
+lora:
+  r: 32
+  alpha: 32
+  dropout: 0
+  bias: none
+  use_gradient_checkpointing: unsloth
+  target_modules:
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+  - gate_proj
+  - up_proj
+  - down_proj
+training:
+  train_batch_size: 2
+  gradient_steps: 8
+  max_steps: 300
+  stage_max_steps: 100
+  warmup_steps: 10
+  lr: 0.0001
+  lr_scheduler_type: cosine
+  optim: paged_adamw_8bit
+  assistant_only_loss: true
+  packing: false
+  logging_steps: 5
+  eval_steps: 20
+  save_steps: 60
+  save_total_limit: 2
+  report_to: none
+  dataloader_num_workers: 2
+  dataloader_pin_memory: true
+  max_grad_norm: 1.0
+  seed: 42
+runs:
+- name: sft_v4_clingo
+  category_col: null
+  schedule_type: plain

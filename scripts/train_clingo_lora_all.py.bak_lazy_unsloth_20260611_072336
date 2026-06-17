@@ -131,13 +131,8 @@ class JsonlMetricCallback(TrainerCallback):
         self.jsonl_path = jsonl_path
         self.logger = logger
         self.latest_grad_norm: float | None = None
+        self.writer = SummaryWriter(log_dir=str(tb_dir)) if tb_dir is not None else None
         self.jsonl_path.parent.mkdir(parents=True, exist_ok=True)
-        if tb_dir is not None:
-            tb_dir = Path(tb_dir)
-            tb_dir.mkdir(parents=True, exist_ok=True)
-            self.writer = SummaryWriter(log_dir=str(tb_dir))
-        else:
-            self.writer = None
 
     def on_pre_optimizer_step(self, args, state, control, model=None, **kwargs):
         if model is None:
@@ -443,19 +438,6 @@ def prepare_tokenized_dataset(dataset: Dataset, tokenizer, train: bool, seed: in
     return mapped
 
 
-def normalize_report_to(value):
-    if value is None:
-        return []
-    if isinstance(value, (list, tuple)):
-        raw = list(value)
-    else:
-        raw = [str(value)]
-    lowered = [str(x).strip().lower() for x in raw]
-    if not lowered or any(x in {"", "none", "false", "0", "no", "off", "disabled"} for x in lowered):
-        return []
-    return [str(x).strip() for x in raw if str(x).strip()]
-
-
 def make_training_arguments(**kwargs) -> TrainingArguments:
     args_cls = SFTConfig if SFTConfig is not None else TrainingArguments
     params = signature(args_cls.__init__).parameters
@@ -622,12 +604,8 @@ def train_one_run(
 
     model_slug = Path(config.MODEL_PATH).name
     save_path = config.MODELS_DIR / f"{model_slug}-sft-{run_name}"
-
-    # Keep final adapters unchanged, but isolate temporary per-stage artifacts
-    # by base model. Without this, qwen3-0.6b and qwen3-1.7b running the same
-    # CL run_name in parallel both write into outputs/train_runs/<run_name>/stage_adapters.
-    run_out = RUN_ROOT / model_slug / run_name
-    tb_run = TB_ROOT / model_slug / run_name
+    run_out = RUN_ROOT / run_name
+    tb_run = TB_ROOT / run_name
     metrics_jsonl = run_out / "metrics.jsonl"
     stage_adapter_root = run_out / "stage_adapters"
 
@@ -754,9 +732,6 @@ def train_one_run(
                     stage_adapter_path,
                 )
 
-                stage_tb.mkdir(parents=True, exist_ok=True)
-                report_to = normalize_report_to(tcfg.get("report_to", "none"))
-
                 args = make_training_arguments(
                     output_dir=str(stage_dir / "checkpoints"),
                     run_name=stage_name,
@@ -776,7 +751,7 @@ def train_one_run(
                     save_strategy="steps",
                     save_steps=max(1, min(int(tcfg.get("save_steps", 100)), int(max_steps))),
                     save_total_limit=int(tcfg.get("save_total_limit", 2)),
-                    report_to=report_to,
+                    report_to=[str(tcfg.get("report_to", "tensorboard"))],
                     logging_dir=str(stage_tb),
                     dataloader_num_workers=int(tcfg.get("dataloader_num_workers", 2)),
                     dataloader_pin_memory=bool(tcfg.get("dataloader_pin_memory", True)),
@@ -796,7 +771,7 @@ def train_one_run(
                     train_dataset=train_tokenized,
                     eval_dataset=val_tokenized,
                     args=args,
-                    callbacks=[JsonlMetricCallback(metrics_jsonl, logger, tb_dir=(stage_tb if report_to else None))],
+                    callbacks=[JsonlMetricCallback(metrics_jsonl, logger, tb_dir=stage_tb)],
                 )
 
                 final_train_result = trainer.train()
