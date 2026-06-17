@@ -1,0 +1,51 @@
+dataset:
+  local_path: datasets/clingo/synthetic_v3_100_exact5_scoreview
+  split: train
+  limit: null
+  chunk_size: 5000
+
+model:
+  name_or_path: Qwen/Qwen3-4B
+  local_path: models/qwen3-4b
+  dtype: float16
+  device: cuda
+
+loss:
+  batch_size: 4
+  max_length: 2048
+
+ppl:
+  batch_size: 4
+  max_length: 2048
+  skip_truncated: true
+
+lexical:
+  n_clusters: 10
+
+semantic:
+  batch_size: 8
+  max_length: 1024
+  n_clusters: 10
+  layer_idx: null
+
+llm_judge:
+  enabled: true
+  mode: forced_choice
+  batch_size: 8
+  max_length: 2048
+  min_score: 1
+  max_score: 5
+
+curriculum:
+  percentiles: [33, 66]
+
+runtime:
+  offline: true
+  skip_existing: true
+
+output:
+  root: outputs/curriculum_clingo_exact5
+  final_dataset_dir: datasets/clingo/synthetic_v3_100_exact5_scored
+  final_parquet_path: outputs/curriculum_clingo_exact5/clingo_exact5_scored.parquet
+  final_preview_csv_path: outputs/curriculum_clingo_exact5/clingo_exact5_scored_preview.csv
+  final_summary_path: outputs/curriculum_clingo_exact5/clingo_exact5_summary.json
