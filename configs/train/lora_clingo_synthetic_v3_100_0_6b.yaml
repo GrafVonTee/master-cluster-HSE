@@ -67,3 +67,4 @@ runs:
   - name: clingo_difficulty_distribution
     category_col: difficulty_category
     schedule_type: distribution
+\ntraining:\n  report_to: none\n

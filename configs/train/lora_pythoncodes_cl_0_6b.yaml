@@ -111,3 +111,4 @@ runs:
   - name: cl_llm_judge_distribution
     category_col: llm_judge_category
     schedule_type: distribution
+\ntraining:\n  report_to: none\n
